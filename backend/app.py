@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import request, jsonify, render_template, redirect,Flask
 from flask_cors import CORS
 import os, sys, re, time, random, json, argparse, threading,csv
 import pandas as pd
@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 from fake_useragent import UserAgent    
 from config import Config
 from extensions import db, jwt, cors
-
+import pandas as pd
 
 
 # Initialize Flask app
@@ -104,7 +104,7 @@ class BusinessList:
                 cursor = connection.cursor()
                 
                 cursor.execute("""
-                CREATE TABLE IF NOT EXISTS businesses (
+                CREATE TABLE IF NOT EXISTS google_Map (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(500),
                     address TEXT,
@@ -162,7 +162,7 @@ class BusinessList:
                 # """)
 
                 insert_query_complete_entries = """
-                INSERT INTO businesses (
+                INSERT INTO google_Map (
                     name, address, website, phone_number,
                     reviews_count, reviews_average, category,
                     subcategory, city, state, area
@@ -397,7 +397,7 @@ def api_results():
            database=os.getenv('DB_NAME')
         )
         cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM businesses LIMIT 1000")
+        cursor.execute("SELECT * FROM google_Map LIMIT 1000")
         results = cursor.fetchall()
         return jsonify(results)
     except Error as e:
@@ -442,6 +442,130 @@ def main():
     run_scraper(search_list)      
 
 
+def safe_get(row,column):
+        value = getattr(row, column, None)
+        return None if pd.isna(value) else value
+
+
+@app.route('/upload_google_data', methods=["POST"])
+def upload_google_data():
+
+    connection = None
+    inserted = 0
+    try:
+        print("Connecting with:", os.getenv('DB_HOST'), os.getenv('DB_USER'), os.getenv('DB_NAME'))
+        connection = mysql.connector.connect(
+           host=os.getenv('DB_HOST'),
+           user=os.getenv('DB_USER'),
+           password=os.getenv('DB_PASSWORD'),
+           database=os.getenv('DB_NAME')
+        )
+        cursor = connection.cursor()
+        if request.files:
+            files = request.files.getlist("file")
+            total_row_data = []
+            for file in files:
+                if file.filename == "": # handling empty files
+                    continue   
+                currFile = pd.read_csv(file)
+                for row in currFile.itertuples(index=False):
+                    print(row)
+                    row_tuple = (
+                    safe_get(row, 'name'),
+                    safe_get(row, 'address'),
+                    safe_get(row, 'website'),
+                    safe_get(row, 'phone_number'),
+                    safe_get(row, 'reviews_count'),
+                    safe_get(row, 'reviews_average'),
+                    safe_get(row, 'category'),
+                    safe_get(row, 'subcategory'),
+                    safe_get(row, 'city'),
+                    safe_get(row, 'state'),
+                    safe_get(row, 'area')
+                    )
+                    total_row_data.append(row_tuple)
+                    inserted+=1  # keeping track of total rows being added
+
+                    # storing the valus in the database
+            print(total_row_data)
+            upload_google_map_data_query = '''
+                INSERT INTO google_map (
+                    name, address, website, phone_number, reviews_count, reviews_average, category, subcategory, city, state, area
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            '''
+            cursor.executemany(upload_google_map_data_query,
+                total_row_data
+            )
+            connection.commit()
+    except Error as e:
+        print(f"Error uploading data inside the google_map table: {e}")
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+    return jsonify({
+    "status": "success"
+})
+
+
+@app.route('/upload_amazon_data', methods=["POST"])
+def upload_amazon_data():
+
+    connection = None
+    inserted = 0
+    try:
+        print("Connecting with:", os.getenv('DB_HOST'), os.getenv('DB_USER'), os.getenv('DB_NAME'))
+        connection = mysql.connector.connect(
+           host=os.getenv('DB_HOST'),
+           user=os.getenv('DB_USER'),
+           password=os.getenv('DB_PASSWORD'),
+           database=os.getenv('DB_NAME')
+        )
+        cursor = connection.cursor()
+        if request.files:
+            files = request.files.getlist("file")
+            total_row_data = []
+            for file in files:
+                if file.filename == "": # handling empty files
+                    continue   
+                currFile = pd.read_csv(file)
+                for row in currFile.itertuples(index=False):
+                    # print(row)
+                    row_tuple = (
+                    safe_get(row, 'product_name'),
+                    safe_get(row, 'address'),
+                    safe_get(row, 'website'),
+                    safe_get(row, 'phone_number'),
+                    safe_get(row, 'reviews_count'),
+                    safe_get(row, 'reviews_average'),
+                    safe_get(row, 'category'),
+                    safe_get(row, 'subcategory'),
+                    safe_get(row, 'city'),
+                    safe_get(row, 'state'),
+                    safe_get(row, 'area')
+                    )
+                    total_row_data.append(row_tuple)
+                    inserted+=1  # keeping track of total rows being added
+
+                    # storing the valus in the database
+            # print(total_row_data)
+            upload_google_map_data_query = '''
+                INSERT INTO google_map (
+                    name, address, website, phone_number, reviews_count, reviews_average, category, subcategory, city, state, area
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            '''
+            cursor.executemany(upload_google_map_data_query,
+                total_row_data
+            )
+            connection.commit()
+    except Error as e:
+        print(f"Error uploading data inside the google_map table: {e}")
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+    return jsonify({
+    "status": "success"
+})
+            
 # amazone scrapper 
 # MySQL connection config (use environment variables or hardcode for local)
 DB_CONFIG_AMAZON = {
