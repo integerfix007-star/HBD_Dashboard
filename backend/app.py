@@ -448,7 +448,7 @@ def safe_get(row,column):
     value = getattr(row, column, None)
     return None if pd.isna(value) else value
 
-def clean_phone(value):
+def clean_data_decimal(value):
     if value is None:
         return None
     
@@ -461,12 +461,760 @@ def clean_phone(value):
     value = value.strip()
 
     # Remove invalid values
-    if value in ["", "0", "nan", "None"]:
+    if value in ["", "nan", "None"]:
         return None
-    if value[0] =='0':
+    if len(value) > 1 and value[0] =='0':
         return value[1:]
 
     return value
+
+
+@app.route('/upload_freelisting_data', methods=["POST"])
+def upload_freelisting_data():
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'name'),
+                        safe_get(row, 'phone'),
+                        safe_get(row, 'address'),
+                        safe_get(row, 'description'),
+                        safe_get(row, 'category'),
+                        safe_get(row, 'url'),
+                        safe_get(row, 'subcategory_1'),
+                        safe_get(row, 'subcategory_2'),
+                        safe_get(row, 'subcategory'),
+                        safe_get(row, 'catagories_4'),
+                        safe_get(row, 'catagories_href_3'),
+                        )
+                        chunk_data.append(row_tuple)
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO freelisting (
+                            name, number, address, description, category, url, subcategory_1, subcategory_2, subcategory, categories_4, categories_href_3
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            number = VALUES(number),
+                            description = VALUES(description),
+                            category = VALUES(category),
+                            url = VALUES(url),
+                            subcategory_1 = VALUES(subcategory_1),
+                            subcategory_2 = VALUES(subcategory_2),
+                            subcategory = VALUES(subcategory),
+                            categories_4 = VALUES(categories_4),
+                            categories_href_3 = VALUES(categories_href_3);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from freelisting')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200
+
+
+@app.route('/upload_justdial_data', methods=["POST"])
+def upload_justdial_data():
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'category'),
+                        safe_get(row, 'city'),
+                        safe_get(row, 'company'),
+                        safe_get(row, 'area'),
+                        safe_get(row, 'address'),
+                        clean_data_decimal(safe_get(row, 'pin')),
+                        safe_get(row, 'emailaddress'),
+                        safe_get(row, 'virtualnumber'),
+                        safe_get(row, 'whatsapp'),
+                        safe_get(row, 'phone1'),
+                        safe_get(row, 'phone2'),
+                        safe_get(row, 'phone3'),
+                        safe_get(row, 'latitude'),
+                        safe_get(row, 'longitude'),
+                        safe_get(row, 'rating'),
+                        clean_data_decimal(safe_get(row, 'reviews')),
+                        safe_get(row, 'website'),
+                        )
+                        chunk_data.append(row_tuple)
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO justdial (
+                            category, city, company, area, address, pin, email, virtualnumber, whatsapp, number1, number2, number3, latitude, longitude, rating, reviews, website
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            category = VALUES(category),
+                            city = VALUES(city),
+                            area = VALUES(area),
+                            pin = VALUES(pin),
+                            email = VALUES(email),
+                            virtualnumber = VALUES(virtualnumber),
+                            whatsapp = VALUES(whatsapp),
+                            number1 = VALUES(number1),
+                            number2 = VALUES(number2),
+                            number3 = VALUES(number3),
+                            latitude = VALUES(latitude),
+                            longitude = VALUES(longitude),
+                            rating = VALUES(rating),
+                            reviews = VALUES(reviews),
+                            website = VALUES(website);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from justdial')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200
+
+
+@app.route('/upload_post_office_data', methods=["POST"])
+def upload_post_office_data():
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'pincode'),
+                        safe_get(row, 'area_name'),
+                        safe_get(row, 'taluka_name'),
+                        safe_get(row, 'city_name'),
+                        safe_get(row, 'state_name'),
+                        )
+                        chunk_data.append(row_tuple)
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO post_office (
+                            pincode, area, taluka, city, state
+                        ) VALUES (%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            taluka = VALUES(taluka),
+                            city = VALUES(city),
+                            state = VALUES(state);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from post_office')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200
+
+
+@app.route('/upload_heyplaces_data', methods=["POST"])
+def upload_heyplaces_data():
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'Name'),
+                        safe_get(row, 'Address'),
+                        safe_get(row, 'Number'),
+                        safe_get(row, 'Website'),
+                        safe_get(row, 'category'),
+                        safe_get(row, 'city'),
+                        )
+                        chunk_data.append(row_tuple)
+
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO heyplaces (
+                            name, address, number, website, category, city
+                        ) VALUES (%s,%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            number = VALUES(number),
+                            website = VALUES(website),
+                            category = VALUES(category),
+                            city = VALUES(city);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from heyplaces')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200
+
+
+@app.route('/upload_nearbuy_data', methods=["POST"])
+def upload_nearbuy_data():
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'Name'),
+                        safe_get(row, 'Address'),
+                        safe_get(row, 'Latitude'),
+                        safe_get(row, 'Longitude'),
+                        safe_get(row, 'Number'),
+                        safe_get(row, 'Rating'),
+                        safe_get(row, 'Country'),
+                        safe_get(row, 'City'),
+                        )
+                        chunk_data.append(row_tuple)
+
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO nearbuy (
+                            name, address, latitude, longitude, number, rating, country, city
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            latitude = VALUES(latitude),
+                            longitude = VALUES(longitude),
+                            number = VALUES(number),
+                            rating = VALUES(rating),
+                            country = VALUES(country),
+                            city = VALUES(city);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from nearbuy')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200
+
+
+@app.route('/upload_pinda_data', methods=["POST"])
+def upload_pinda_data():
+
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'Name'),
+                        safe_get(row, 'Url'),
+                        safe_get(row, 'Address'),
+                        safe_get(row, 'Phone'),
+                        safe_get(row, 'Category'),
+                        safe_get(row, 'Country'),
+                        safe_get(row, 'City'),
+                        )
+                        chunk_data.append(row_tuple)
+
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO pinda (
+                            name, url, address, phone, category, country, city
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            url = VALUES(url),
+                            phone = VALUES(phone),
+                            category = VALUES(category),
+                            country = VALUES(country),
+                            city = VALUES(city);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from pinda')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200
+
+
+@app.route('/upload_college_dunia_data', methods=["POST"])
+def upload_college_dunia_data():
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk = chunk.rename(columns = lambda c: c.replace(' ','_'))
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'Name'),
+                        safe_get(row, 'Address'),
+                        safe_get(row, 'Area'),
+                        safe_get(row, 'Avg_Fees'),
+                        safe_get(row, 'Rating'),
+                        safe_get(row, 'Number'),
+                        safe_get(row, 'Website'),
+                        safe_get(row, 'Country'),
+                        safe_get(row, 'Subcategory'),
+                        safe_get(row, 'Category'),
+                        safe_get(row, 'Course_Details'),
+                        safe_get(row, 'Duration'),
+                        safe_get(row, 'Mail'),
+                        safe_get(row, 'Requirement'),
+                        )
+                        chunk_data.append(row_tuple)
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO college_dunia (
+                            name, address, area, avg_fees, rating, number, website, country, subcategory, category, course_details, duration, email, requirement
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            area = VALUES(area),
+                            avg_fees = VALUES(avg_fees),
+                            rating = VALUES(rating),
+                            number = VALUES(number),
+                            website = VALUES(website),
+                            country = VALUES(country),
+                            subcategory = VALUES(subcategory),
+                            category = VALUES(category),
+                            course_details = VALUES(course_details),
+                            duration = VALUES(duration),
+                            email = VALUES(email),
+                            requirement = VALUES(requirement);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from college_dunia')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200 
+
+
+@app.route('/upload_bank_data', methods=["POST"])
+def upload_bank_data():
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk = chunk.rename(columns = lambda c: c.replace(' ','_'))
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'Bank'),
+                        safe_get(row, 'IFSC'),
+                        safe_get(row, 'MICR'),
+                        safe_get(row, 'Branch_Code'),
+                        safe_get(row, 'Branch'),
+                        safe_get(row, 'Address'),
+                        safe_get(row, 'City'),
+                        safe_get(row, 'District'),
+                        safe_get(row, 'State'),
+                        safe_get(row, 'Contact'),
+                        )
+                        chunk_data.append(row_tuple)
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO bank_data (
+                            bank, ifsc, micr, branch_code, branch, address, city, district, state, contact
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            ifsc = VALUES(ifsc),
+                            micr = VALUES(micr),
+                            branch = VALUES(branch),
+                            address = VALUES(address),
+                            city = VALUES(city),
+                            district = VALUES(district),
+                            state = VALUES(state),
+                            contact = VALUES(contact);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from bank_data')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200  
+
+
+@app.route('/upload_atm_data', methods=["POST"])
+def upload_atm_data():
+
+
+    connection = None
+    inserted = 0
+    batch_size = 10000
+    try:
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD_PLAIN'),
+            database=os.getenv('DB_NAME'),
+            port=os.getenv('DB_PORT')
+        )
+        cursor = connection.cursor()
+
+
+        if request.files:
+            files = request.files.getlist("file")
+            for file in files:
+                if file.filename == "":
+                    continue
+                chunkFile_data = pd.read_csv(file,chunksize = batch_size)
+                for chunk in chunkFile_data:
+                    chunk_data = []
+                    for row in chunk.itertuples(index=False):
+                        row_tuple = (
+                        safe_get(row, 'Bank'),
+                        safe_get(row, 'Address'),
+                        safe_get(row, 'City'),
+                        safe_get(row, 'State'),
+                        safe_get(row, 'Country'),
+                        safe_get(row, 'Category'),
+                        )
+                        chunk_data.append(row_tuple)
+
+
+                    # execute batch insert
+                    insert_query = '''
+                        INSERT INTO atm (
+                            bank, address, city, state, country, category
+                        ) VALUES (%s,%s,%s,%s,%s,%s)
+                        ON DUPLICATE KEY UPDATE
+                            city = VALUES(city),
+                            state = VALUES(state),
+                            country = VALUES(country),
+                            category = VALUES(category);
+                        '''
+                    cursor.executemany(insert_query, chunk_data)
+                    connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from atm')
+            inserted = cursor.fetchone()
+    except Error as e:
+        print("Error inserting data:", e)
+        return jsonify({
+            "status": "error",
+            "message": f"Database error:{e}"
+        }), 400
+    except Exception as e:
+        print("Error inserting the data:",e)
+        return jsonify({
+            "status":"error",
+            "message":f"Processiong error:{e}"
+        })
+    finally:
+        if connection and connection.is_connected():
+            connection.close()
+
+
+    return jsonify({
+        "status": "success",
+        "inserted_rows": inserted
+    }),200
 
 
 @app.route('/upload_asklaila_data', methods=["POST"])
@@ -498,10 +1246,9 @@ def upload_asklaila_data():
                         # print(row.phone_2)
 
                         row_tuple = (
-                        safe_get(row,'source'),
                         safe_get(row, 'name'),
-                        clean_phone(safe_get(row, 'phone_1')),
-                        clean_phone(safe_get(row, 'phone_2')),
+                        clean_data_decimal(safe_get(row, 'phone_1')),
+                        clean_data_decimal(safe_get(row, 'phone_2')),
                         safe_get(row, 'category'),
                         safe_get(row, 'sub_category'),
                         safe_get(row, 'email'),
@@ -515,18 +1262,16 @@ def upload_asklaila_data():
                         safe_get(row,'country'),
                         )
                         chunk_data.append(row_tuple)
-                        inserted += 1
 
             # execute batch insert
                     insert_query = '''
                         INSERT INTO asklaila (
-                            source, name, phone1, phone2, category,
+                            name, number1, number2, category,
                             subcategory, email, url, ratings, address, pincode, area, city, state, country
-                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON DUPLICATE KEY UPDATE
-                            source = VALUES(source),
-                            phone1 = VALUES(phone1),
-                            phone2 = VALUES(phone2),
+                            number1 = VALUES(number1),
+                            number2 = VALUES(number2),
                             category = VALUES(category),
                             subcategory = VALUES(subcategory),
                             email = VALUES(email),
@@ -540,6 +1285,10 @@ def upload_asklaila_data():
                         '''
                     cursor.executemany(insert_query, chunk_data)
                     connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from asklaila')
+            inserted = cursor.fetchone()
 
     except Error as e:
         print("Error inserting data:", e)
@@ -601,7 +1350,6 @@ def upload_schoolgis_data():
                         safe_get(row,'Source'),
                         )
                         chunk_data.append(row_tuple)
-                        inserted += 1
 
             # execute batch insert
                     insert_query = '''
@@ -620,6 +1368,10 @@ def upload_schoolgis_data():
                         '''
                     cursor.executemany(insert_query, chunk_data)
                     connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from schoolgis')
+            inserted = cursor.fetchone()
 
     except Error as e:
         print("Error inserting data:", e)
@@ -685,18 +1437,17 @@ def upload_yellow_pages_data():
                         )
 
                         chunk_data.append(row_tuple)
-                        inserted += 1
 
                     insert_query = """
                         INSERT INTO yellow_pages (
-                            name, address, area, number, mail, category,
+                            name, address, area, number, email, category,
                             pincode, city, state, country, source
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
                         area = VALUES(area),
                         number = VALUES(number),
-                        mail = VALUES(mail),
+                        email = VALUES(email),
                         category = VALUES(category),
                         pincode = VALUES(pincode),
                         city = VALUES(city),
@@ -707,6 +1458,10 @@ def upload_yellow_pages_data():
 
                     cursor.executemany(insert_query, chunk_data)
                     connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from yellow_pages')
+            inserted = cursor.fetchone()
 
     except Error as e:
         print(f"Error uploading data inside the yellow_pages table:, {e}")
@@ -818,7 +1573,6 @@ def upload_google_data():
                         safe_get(row, 'EmbedMapCode'),
                         )   
                         chunk_data.append(row_tuple)
-                        inserted+=1
 
                     # storing the valus in the database
                     upload_google_map_data_query = '''
@@ -954,6 +1708,10 @@ def upload_google_data():
                         chunk_data
                     )
                     connection.commit()
+            cursor.close()
+            cursor = connection.cursor()
+            cursor.execute('Select count(*) from google_map')
+            inserted = cursor.fetchone()
     except Error as e:
         print(f"Error uploading data inside the google_map table: {e}")
         return jsonify({
