@@ -13,4 +13,6 @@ celery.conf.update(
     enable_utc=True,
 )
 
-# import tasks
+celery.autodiscover_tasks(["tasks"])
+
+import tasks.listings_task.upload_shiksha_task
