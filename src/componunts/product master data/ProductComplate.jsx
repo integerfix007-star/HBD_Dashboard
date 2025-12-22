@@ -199,7 +199,7 @@ const ProductComplete = () => {
         <CardHeader className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-100">
           <div className="flex gap-3 items-center flex-wrap">
             <Input
-              label="Search Name..."
+              label="Search Product Name..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
