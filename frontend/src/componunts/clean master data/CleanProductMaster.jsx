@@ -116,8 +116,12 @@ const CleanProductMaster = () => {
   /* -------------------- Actions -------------------- */
 
   const toggleSort = (field) => {
-    setSortField(field);
-    setSortOrder((o) => (field === sortField && o === "asc" ? "desc" : "asc"));
+    if (field === sortField) {
+      setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortOrder("asc");
+    }
   };
 
   const downloadCSV = (currentOnly) => {
@@ -149,7 +153,9 @@ const CleanProductMaster = () => {
   return (
     <div className="min-h-screen mt-8 mb-12 px-4 bg-white text-black">
       <div className="flex justify-between mb-4">
-        <Typography variant="h4" className="pb-2">Clean Product Data</Typography>
+        <Typography variant="h4" className="pb-2">
+          Clean Product Data
+        </Typography>
         <div className="flex gap-2">
           <Button size="sm" onClick={() => downloadCSV(false)}>CSV All</Button>
           <Button size="sm" onClick={() => downloadCSV(true)}>CSV Page</Button>
@@ -160,8 +166,16 @@ const CleanProductMaster = () => {
 
       <Card>
         <CardHeader className="flex flex-wrap gap-3 p-4 bg-gray-100">
-          <Input label="Search Name" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <Input label="Search Category" value={categorySearch} onChange={(e) => setCategorySearch(e.target.value)} />
+          <Input
+            label="Search Name"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <Input
+            label="Search Category"
+            value={categorySearch}
+            onChange={(e) => setCategorySearch(e.target.value)}
+          />
           <select
             value={source}
             onChange={(e) => setSource(e.target.value)}
@@ -183,13 +197,19 @@ const CleanProductMaster = () => {
 
         <CardBody className="p-0 overflow-x-auto">
           {loading ? (
-            <div className="flex justify-center py-10"><Spinner /></div>
+            <div className="flex justify-center py-10">
+              <Spinner />
+            </div>
           ) : (
             <table className="w-full min-w-[1500px] table-fixed">
               <thead className="bg-gray-200 sticky top-0">
                 <tr>
                   {COLUMNS.map((c) => (
-                    <th key={c.key} style={{ width: c.width }} className="px-3 py-2">
+                    <th
+                      key={c.key}
+                      style={{ width: c.width }}
+                      className="px-3 py-2"
+                    >
                       <div
                         className="flex gap-2 cursor-pointer"
                         onClick={() => toggleSort(c.key)}
@@ -201,16 +221,49 @@ const CleanProductMaster = () => {
                   ))}
                 </tr>
               </thead>
+
               <tbody>
-                {pageData.map((row, i) => (
-                  <tr key={i} className="border-b hover:bg-gray-50">
-                    {COLUMNS.map((c) => (
-                      <td key={c.key} className="px-3 py-3 text-sm break-words">
-                        {String(row[c.key] ?? "-")}
-                      </td>
-                    ))}
+                {pageData.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={COLUMNS.length}
+                      className="text-center p-10 text-gray-500"
+                    >
+                      No product data found.
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  pageData.map((row, index) => (
+                    <tr
+                      key={index}
+                      className="even:bg-blue-gray-50/50 hover:bg-blue-50/50 transition-colors"
+                    >
+                      {COLUMNS.map((col) => (
+                        <td
+                          key={col.key}
+                          className="p-4 text-sm border-b border-blue-gray-50 truncate"
+                        >
+                          {col.key === "url" || col.key === "image_url"? (
+                            <a
+                              href={row[col.key]}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-600 font-medium hover:underline"
+                            >
+                              View Link
+                            </a>
+                          ) : col.key === "price" ? (
+                            <span className="font-bold text-green-700">
+                              ₹{row[col.key] || "0.00"}
+                            </span>
+                          ) : (
+                            String(row[col.key] ?? "-")
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           )}
