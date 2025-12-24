@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import api from "../../utils/Api";
+import api from "../../../utils/Api";
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
-const SchoolgisUploader = () => {
+const HeyPlacesUploader = () => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -46,7 +46,7 @@ const SchoolgisUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/schoolgis/upload/schoolgis-data",
+        "/hey-places/upload/hey-places-data",
         formData,
         {
           headers: {
@@ -132,4 +132,4 @@ const SchoolgisUploader = () => {
   );
 };
 
-export default SchoolgisUploader;
+export default HeyPlacesUploader;

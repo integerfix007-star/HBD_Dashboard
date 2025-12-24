@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import api from "../../utils/Api";
+import api from "../../../utils/Api";
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 

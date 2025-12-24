@@ -1,6 +1,6 @@
 import pandas as pd
 from database.mysql_connection import get_mysql_connection
-from utils.safe_get import safe_get,to_valid_json
+from utils.safe_get import safe_get
 from utils.to_valid_json import to_valid_json
 
 def upload_nearbuy_data(file_paths):

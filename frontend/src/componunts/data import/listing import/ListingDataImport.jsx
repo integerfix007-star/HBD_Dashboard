@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import api from "../../utils/Api";
+import api from "../../../utils/Api";
 
 const ListingDataImport = () => {
   const [file, setFile] = useState(null);

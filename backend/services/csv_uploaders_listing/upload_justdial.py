@@ -1,6 +1,6 @@
 import pandas as pd
 from database.mysql_connection import get_mysql_connection
-from utils.safe_get import safe_get,clean_data_decimal
+from utils.safe_get import safe_get
 from utils.clean_data_decimal import clean_data_decimal
 
 def upload_justdial_data(file_paths):

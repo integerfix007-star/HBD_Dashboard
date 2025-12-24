@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import api from "../../utils/Api";
+import api from "../../../utils/Api";
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
-const AtmUploader = () => {
+const AmazonUploader = () => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -46,7 +46,7 @@ const AtmUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/atm/upload/atm-data",
+        "/amazon/upload/amazon-data",
         formData,
         {
           headers: {
@@ -68,7 +68,7 @@ const AtmUploader = () => {
 
   return (
     <div className="p-6 max-w-xlg bg-white rounded-lg shadow mt-6">
-      <h2 className="text-xl font-bold mb-4">Upload Listing CSV Files</h2>
+      <h2 className="text-xl font-bold mb-4">Upload Amazon CSV Files</h2>
 
       <form onSubmit={handleSubmit}>
         <input
@@ -132,4 +132,4 @@ const AtmUploader = () => {
   );
 };
 
-export default AtmUploader;
+export default AmazonUploader;

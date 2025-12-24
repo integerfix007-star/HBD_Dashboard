@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import api from "../../utils/Api";
+import api from "../../../utils/Api";
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
-const BankDataUploader = () => {
+const NearbuyUploader = () => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -46,7 +46,7 @@ const BankDataUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/bank/upload/bank-data",
+        "/near-buy/upload/near-buy-data",
         formData,
         {
           headers: {
@@ -132,4 +132,4 @@ const BankDataUploader = () => {
   );
 };
 
-export default BankDataUploader;
+export default NearbuyUploader;

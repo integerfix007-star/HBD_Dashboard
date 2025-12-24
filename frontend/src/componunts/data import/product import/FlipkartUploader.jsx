@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import api from "../../utils/Api";
+import api from "../../../utils/Api";
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
-const CollegeDuniaUploader = () => {
+const FlipkartUploader = () => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -46,7 +46,7 @@ const CollegeDuniaUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/college-dunia/upload/college-dunia-data",
+        "/flipkart/upload/flipkart-data",
         formData,
         {
           headers: {
@@ -68,7 +68,7 @@ const CollegeDuniaUploader = () => {
 
   return (
     <div className="p-6 max-w-xlg bg-white rounded-lg shadow mt-6">
-      <h2 className="text-xl font-bold mb-4">Upload Listing CSV Files</h2>
+      <h2 className="text-xl font-bold mb-4">Upload Flipkart CSV Files</h2>
 
       <form onSubmit={handleSubmit}>
         <input
@@ -132,4 +132,4 @@ const CollegeDuniaUploader = () => {
   );
 };
 
-export default CollegeDuniaUploader;
+export default FlipkartUploader;

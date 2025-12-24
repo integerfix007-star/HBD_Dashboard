@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import api from "../../utils/Api";
+import api from "../../../utils/Api";
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
-const YellowPagesUploader = () => {
+const FreelistingUploader = () => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -46,7 +46,7 @@ const YellowPagesUploader = () => {
       setLoading(true);
 
       const response = await api.post(
-        "/yellow-pages/upload/yellow-pages-data",
+        "/freelisting/upload/freelisting-data",
         formData,
         {
           headers: {
@@ -132,4 +132,4 @@ const YellowPagesUploader = () => {
   );
 };
 
-export default YellowPagesUploader;
+export default FreelistingUploader;
