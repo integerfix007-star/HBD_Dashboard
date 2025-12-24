@@ -53,13 +53,14 @@ const scrappingTrend = {
 
 const categoriesData = {
   type: "pie",
-  height: 220,
-  series: [700, 300], // Product Listing, Others
+  height: 268,
+  series: [700, 300, 400], // Product Listing, Others
   options: {
-    labels: ["Product Listing", "Others"],
-    colors: ["#008FFB", "#00E396"],
+    labels: ["Product", "Listing", "Others"],
+    colors: ["#008FFB", "#00E396", "#FFFF00"],
     legend: {
       position: "bottom",
+      fontSize: "13px",
     },
     responsive: [
       {
@@ -95,7 +96,7 @@ export const statisticsChartsData2 = [
   },
   {
     color: "white",
-    title: "Scraping Trend",
+    title: "Categories Distribution",
     description: "Last Campaign Performance",
     footer: "just updated",
     chart: categoriesData,
