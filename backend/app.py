@@ -858,7 +858,12 @@ from routes.listing_routes.upload_shiksha_route import shiksha_bp
 from routes.listing_routes.upload_yellow_pages_route import yellow_pages_bp
 from routes.product_routes.upload_amazon_products_route import amazon_bp
 from routes.product_routes.upload_vivo_route import vivo_bp
-from routes.product_routes.upload_big_basket_route import bigbasket_bp
+from routes.product_routes.upload_big_basket_route import upload_big_basket_route
+from routes.product_routes.upload_blinkit_route import blinkit_bp
+from routes.product_routes.upload_dmart_route import dmart_bp
+from routes.product_routes.upload_flipkart_products_route import flipkart_bp
+from routes.product_routes.upload_india_mart_route import indiamart_bp
+from routes.product_routes.upload_jio_mart_route import jiomart_bp
 
 blueprints_listing = [(asklaila_bp, "/asklaila"),
     (atm_bp, "/atm"),
@@ -878,7 +883,11 @@ blueprints_listing = [(asklaila_bp, "/asklaila"),
     (yellow_pages_bp, "/yellow-pages"),
     (amazon_bp,"/amazon"),
     (vivo_bp,"/vivo"),
-    (bigbasket_bp,"/bigbasket"),
+    (blinkit_bp,"/blinkit"),
+    (dmart_bp,"/dmart"),
+    (flipkart_bp,"/flipkart"),
+    (indiamart_bp,"/india-mart"),
+    (jiomart_bp,"/jio-mart"),
     ]
 
 for bp,prefix in blueprints_listing:
