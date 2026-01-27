@@ -16,3 +16,5 @@ sqlalchemy
 pymysql
 celery
 redis
+cryptography
+pymysql

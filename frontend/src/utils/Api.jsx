@@ -1,11 +1,8 @@
 import axios from "axios";
-// import dotenv from "dotenv"
-
-// dotenv.config();
 
 const api = axios.create({
-  // baseURL: process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5000", 
-  baseURL: import.meta.env.VITE_API_URL || "http://127.0.0.1:8000", 
+  // Use localhost instead of 127.0.0.1 to ensure better compatibility with CORS
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000", 
   headers: {
     "Content-Type": "application/json",
   },

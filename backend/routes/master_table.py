@@ -11,7 +11,7 @@ master_table_bp = Blueprint("master_table", __name__)
 
 @master_table_bp.route("/upload/master", methods=["POST"])
 def upload_master():
-    files = request.files.getlist("files")
+    files = request.files.getlist("file")
     if not files:
         return jsonify({"error": "No files provided"}), 400
 

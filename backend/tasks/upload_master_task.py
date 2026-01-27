@@ -2,6 +2,7 @@ from celery_app import celery
 from services.master_uploader import upload_master_csv
 from database.session import get_db_session
 from model.upload_master_reports_model import UploadReport
+from datetime import datetime
 
 @celery.task(bind=True, task_time_limit=14400)  # 4 hours
 def process_master_upload_task(self, file_paths):
@@ -14,6 +15,7 @@ def process_master_upload_task(self, file_paths):
             report = UploadReport(task_id=task_id, status="PROCESSING")
             session.add(report)
             session.commit()
+            updated_at=datetime.utcnow()
 
         upload_master_csv(file_paths, session, report)
 
