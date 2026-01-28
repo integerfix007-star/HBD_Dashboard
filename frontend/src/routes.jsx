@@ -112,7 +112,8 @@ import JioMartUploader from "./componunts/data import/product import/JioMartUplo
 import ZeptoUploader from "./componunts/data import/product import/ZeptoUploader";
 import { ScraperManager } from "./layouts/Scrapper_manager";
 import ZomatoUploader from "./componunts/data import/product import/ZomatoUploader";
-
+import { SignIn } from "./pages/auth/sign-in";
+import { SignUp } from "./pages/auth/sign-up";
 import MasterDataDashboard from "./componunts/MasterDataDashboard";
 import { element } from "prop-types";
 
@@ -696,6 +697,24 @@ export const routes = [
       },
     ],
   },
+  {
+    title: "auth pages",
+    layout: "auth",
+    pages: [
+      {
+        icon: <ServerStackIcon {...icon} />,
+        name: "sign in",
+        path: "/sign-in",
+        element: <SignIn />,
+      },
+      {
+        icon: <RectangleStackIcon {...icon} />,
+        name: "sign up",
+        path: "/sign-up",
+        element: <SignUp />,
+      },
+    ],
+  }
 ];
 
 export default routes;
