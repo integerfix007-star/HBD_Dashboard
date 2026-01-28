@@ -12,8 +12,13 @@ import {
   XCircleIcon,
   DocumentTextIcon,
   ArrowUpTrayIcon,
+  ChartBarIcon,
+  
 } from "@heroicons/react/24/solid";
 
+
+
+import MasterDataUploader from "./componunts/data import/MasterDataUploader";
 import MasterDataRegistry from "./componunts/masterdata/MasterDataRegistry";
 import { Home } from "./pages/dashboard/home";
 import { Profile } from "./pages/dashboard/profile";
@@ -22,10 +27,10 @@ import { Notifications } from "./pages/dashboard/notifications";
 import ZomatoData from "./componunts/product master data/ZomatoData";
 import CitiesReports from "./componunts/Reports/cities_reports";
 import CategoriesReports from "./componunts/Reports/categories_reports";
-// --- NEW REPORT IMPORTS ---
+
 import CitiesPendingReport from "./componunts/Reports/CitiesPendingReport";
 import CategoriesPendingReport from "./componunts/Reports/CategoriesPendingReport";
-// --------------------------
+
 import BusinessCategory from "./componunts/masterdata/BusinessCategory";
 import ServiceCategory from "./componunts/masterdata/ServiceCategory";
 import HeyPlacesData from "./componunts/listing master data/HeyPlacesData.jsx";
@@ -56,7 +61,7 @@ import State from "./componunts/masterdata/location msater/State";
 import Country from "./componunts/masterdata/location msater/Country";
 import Area from "./componunts/masterdata/location msater/Area";
 import City from "./componunts/masterdata/location msater/City";
-import GoogleData from "./componunts/listing master data/ShikshaData";
+import GoogleData from "./componunts/listing master data/GoogleData";
 import GoogleMapData from "./componunts/listing master data/GoogleMapData";
 import CollegeDuniaData from "./componunts/listing master data/CollegeDuniaData";
 import MagicPinData from "./componunts/listing master data/MagicPinData";
@@ -107,6 +112,9 @@ import JioMartUploader from "./componunts/data import/product import/JioMartUplo
 import ZeptoUploader from "./componunts/data import/product import/ZeptoUploader";
 import { ScraperManager } from "./layouts/Scrapper_manager";
 import ZomatoUploader from "./componunts/data import/product import/ZomatoUploader";
+import { SignIn } from "./pages/auth/sign-in";
+import { SignUp } from "./pages/auth/sign-up";
+import MasterDataDashboard from "./componunts/MasterDataDashboard";
 import { element } from "prop-types";
 
 const icon = {
@@ -160,6 +168,12 @@ export const routes = [
         name: "Data Report",
         path: "/home2",
         element: <ReportDashboard />,
+       
+      }, {
+        icon: <ChartBarIcon {...icon}/>,
+        name: "Master Dashboard",
+        path: "/masterdata/dashboard",
+        element: <MasterDataDashboard />,
       },
       // ... (Rest of your code remains unchanged)
       {
@@ -172,6 +186,12 @@ export const routes = [
         icon: <ArrowUpTrayIcon {...icon} />,
         name: "Upload Data",
         children: [
+          {
+            icon: <ServerStackIcon {...icon} />, 
+            name: "Master Data Uploader",
+            path: "/data-imports/master-data-uploader",
+            element: <MasterDataUploader />,
+          },
           {
             icon: <ArrowUpTrayIcon {...icon} />,
             name: "Listing Data",
@@ -340,7 +360,8 @@ export const routes = [
         icon: <TableCellsIcon {...icon} />,
         name: "Clean Master Data",
         children: [
-          {
+         
+           {
             icon: <TableCellsIcon {...icon} />,
             name: "Listing Master",
             path: "/masterdata/clean-listing-master",
@@ -676,6 +697,24 @@ export const routes = [
       },
     ],
   },
+  {
+    title: "auth pages",
+    layout: "auth",
+    pages: [
+      {
+        icon: <ServerStackIcon {...icon} />,
+        name: "sign in",
+        path: "/sign-in",
+        element: <SignIn />,
+      },
+      {
+        icon: <RectangleStackIcon {...icon} />,
+        name: "sign up",
+        path: "/sign-up",
+        element: <SignUp />,
+      },
+    ],
+  }
 ];
 
 export default routes;

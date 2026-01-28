@@ -18,6 +18,7 @@ from config import Config
 from extensions import db, jwt, cors, mail
 import pandas as pd
 import ast
+from urllib.parse import quote_plus
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -78,7 +79,23 @@ def protect_all_routes():
 
 # Load environment variables
 load_dotenv()
+class ScraperTask(db.Model):
+    __tablename__ = 'scraper_tasks'
+    id = db.Column(db.Integer, primary_key=True)
+    platform = db.Column(db.String(50))
+    search_query = db.Column(db.String(255))
+    location = db.Column(db.String(255))
+    status = db.Column(db.String(20), default="PENDING")
+    progress = db.Column(db.Integer, default=0)
+    last_index = db.Column(db.Integer, default=0)
+    total_found = db.Column(db.Integer, default=0)
+    should_stop = db.Column(db.Boolean, default=False)
+    error_message = db.Column(db.Text, nullable=True) # Ye missing tha
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
+    
+    def __repr__(self):
+        return f'<ScraperTask {self.id} - {self.status}>'
 # google map scrapper 
 def safe_filename(name: str) -> str:
     """Sanitize filename to remove/replace invalid characters."""
@@ -260,166 +277,178 @@ class BusinessList:
         finally:
             if connection and connection.is_connected():
                 connection.close()
+# Global dictionary to track stop signals for specific tasks
+stop_signals = {}
+@app.route('/api/tasks', methods=['GET'])
+def get_tasks():
+    try:
+        tasks = ScraperTask.query.order_by(ScraperTask.id.desc()).all()
+        return jsonify([{
+            "id": t.id,
+            "platform": t.platform,
+            "query": t.search_query,
+            "status": t.status,
+            "progress": t.progress,
+            "errorMsg": t.error_message
+        } for t in tasks]), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+@app.route('/api/stop', methods=['POST'])
+def stop_task():
+    data = request.json
+    task_id = data.get('task_id')
+    task = ScraperTask.query.get(task_id)
+    if task:
+        task.should_stop = True # Tumhare logic ka variable
+        db.session.commit()
+        return jsonify({"message": "Stop signal sent"}), 200
+    return jsonify({"error": "Task not found"}), 404
 
-def run_scraper(search_list):
-    """Run the scraper with the provided search list"""
-    with sync_playwright() as p:
-        print("playwright is running")
-        browser = p.chromium.launch(headless=False)
-        print("completed playwright")
-        
-        page = browser.new_page()
+def run_scraper(task_id, search_list=None):
+    with app.app_context():
+        task = ScraperTask.query.get(task_id)
+        if not task: return
 
-        page.goto("https://www.google.com/maps", timeout=60000)
-        page.wait_for_timeout(5000)
+        if not search_list:
+            # Search query parsing logic
+            parts = task.search_query.split(' in ')
+            cat = parts[0] if len(parts) > 0 else task.search_query
+            search_list = [{"category": cat, "city": task.location, "state": ""}]
 
-        for search_for_index, search_item in enumerate(search_list):
-            category = search_item['category']
-            city = search_item['city']
-            state = search_item['state']
+        start_from_index = task.last_index if task.last_index else 0
+        task.status = "RUNNING"
+        task.should_stop = False
+        db.session.commit()
 
-            search_query = f"{category}, {city}, {state}"
-            print(f"-----\n{search_for_index} - {search_query}")
-
-            page.locator('//input[@id="searchboxinput"]').fill(search_query)
-            page.wait_for_timeout(3000)
-            page.keyboard.press("Enter")
-            page.wait_for_timeout(5000)
-
-            page.hover('//a[contains(@href, "https://www.google.com/maps/place")]')
-
-            previously_counted = 0
-            while True:
-                page.mouse.wheel(0, 10000)
-                page.wait_for_timeout(3000)
-
-                current_count = page.locator(
-                    '//a[contains(@href, "https://www.google.com/maps/place")]'
-                ).count()
-
-                if current_count >= 1000:  # Default limit for API usage
-                    listings = page.locator(
-                        '//a[contains(@href, "https://www.google.com/maps/place")]'
-                    ).all()[:1000]
-                    listings = [listing.locator("xpath=..") for listing in listings]
-                    print(f"Total Scraped: {len(listings)}")
-                    break
-                elif current_count == previously_counted:
-                    listings = page.locator(
-                        '//a[contains(@href, "https://www.google.com/maps/place")]'
-                    ).all()
-                    print(f"Arrived at all available\nTotal Scraped: {len(listings)}")
-                    break
-                else:
-                    previously_counted = current_count
-                    print(f"Currently Scraped: {current_count}")
-
-            business_list = BusinessList()
-
-            for listing in listings:
-                try:
-                    listing.click()
-                    page.wait_for_timeout(5000)
-
-                    name_attr = 'aria-label'
-                    address_xpath = '//button[@data-item-id="address"]//div[contains(@class, "fontBodyMedium")]'
-                    website_xpath = '//a[@data-item-id="authority"]//div[contains(@class, "fontBodyMedium")]'
-                    phone_xpath = '//button[contains(@data-item-id, "phone:tel:")]//div[contains(@class, "fontBodyMedium")]'
-                    review_count_xpath = '//button[@jsaction="pane.reviewChart.moreReviews"]//span'
-                    reviews_avg_xpath = '//div[@jsaction="pane.reviewChart.moreReviews"]//div[@role="img"]'
-                    subcategory_xpath = '//div[contains(@aria-label, "stars")]/following-sibling::div[contains(@class, "fontBodyMedium")]'
-
-                    business_data = {
-                        'name': listing.get_attribute(name_attr) or "",
-                        'address': page.locator(address_xpath).nth(0).inner_text() if page.locator(address_xpath).count() > 0 else "",
-                        'website': page.locator(website_xpath).nth(0).inner_text() if page.locator(website_xpath).count() > 0 else "",
-                        'phone_number': page.locator(phone_xpath).nth(0).inner_text() if page.locator(phone_xpath).count() > 0 else "",
-                        'subcategory': page.locator(subcategory_xpath).nth(0).inner_text() if page.locator(subcategory_xpath).count() > 0 else "",
-                        'category': category,
-                        'city': city,
-                        'state': state
-                    }
-
-                    if page.locator(review_count_xpath).count() > 0:
-                        business_data['reviews_count'] = int(
-                            page.locator(review_count_xpath).inner_text()
-                            .split()[0]
-                            .replace(',', '')
-                            .strip()
-                        )
-                    else:
-                        business_data['reviews_count'] = None
-
-                    if page.locator(reviews_avg_xpath).count() > 0:
-                        business_data['reviews_average'] = float(
-                            page.locator(reviews_avg_xpath)
-                            .get_attribute(name_attr)
-                            .split()[0]
-                            .replace(',', '.')
-                            .strip()
-                        )
-                    else:
-                        business_data['reviews_average'] = None
-
-                    if business_data['address']:
-                        addr_parts = business_data['address'].split(',')
-                        business_data['area'] = ','.join(addr_parts[:2]).strip() if len(addr_parts) >= 2 else addr_parts[0].strip()
-                    else:
-                        business_data['area'] = ""
-
-                    business = Business(**business_data)
-                    business_list.business_list.append(business)
-
-                except Exception as e:
-                    print(f'Error occurred: {e}')
-
-            print("Preparing to save files...")
-            print("Businesses collected:", len(business_list.business_list))
-
-            safe_name = safe_filename(f"google_maps_data_{category}_{city}_{state}")
-
+        with sync_playwright() as p:
+            browser = None
             try:
-                business_list.save_to_csv(safe_name)
-                print("CSV saved successfully")
+                print(f"Starting DEEP Scraper for Task {task_id}...")
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                )
+                
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080}
+                )
+                page = context.new_page()
+
+                for search_for_index, search_item in enumerate(search_list):
+                    if search_for_index < start_from_index: continue
+
+                    # --- STOP CHECK ---
+                    db.session.refresh(task)
+                    if task.should_stop:
+                        task.status = "STOPPED"
+                        db.session.commit()
+                        return
+
+                    category = search_item.get('category', '')
+                    city = search_item.get('city', '')
+                    
+                    # Phase 1: Collect Links
+                    encoded_query = quote_plus(f"{category} in {city}")
+                    target_url = f"https://www.google.com/maps/search/{encoded_query}?hl=en"
+                    
+                    page.goto(target_url, timeout=60000)
+                    
+                    # Consent and Scroll (Your logic)
+                    try:
+                        page.wait_for_selector('div[role="feed"]', timeout=15000)
+                    except: continue
+
+                    for _ in range(10): # Scroll for links
+                        if task.should_stop: break
+                        page.mouse.wheel(0, 5000)
+                        page.wait_for_timeout(1000)
+
+                    all_links = page.locator('a[href*="/maps/place/"]').all()
+                    business_urls = list(set([link.get_attribute('href') for link in all_links]))
+                    
+                    print(f"Task {task_id}: Found {len(business_urls)} links. Starting Phase 2...")
+                    business_list = BusinessList()
+
+                    # Phase 2: Detail Extraction
+                    for i, url in enumerate(business_urls):
+                        # --- GRANULAR STOP CHECK ---
+                        db.session.refresh(task)
+                        if task.should_stop:
+                            task.status = "STOPPED"
+                            task.last_index = search_for_index
+                            business_list.save_to_mysql()
+                            db.session.commit()
+                            return
+
+                        try:
+                            page.goto(url, timeout=30000)
+                            page.wait_for_timeout(1000)
+
+                            # extraction logic (Your existing scrapers data mapping)
+                            name = page.locator('h1.DUwDvf').first.inner_text() if page.locator('h1.DUwDvf').count() > 0 else "Unknown"
+                            
+                            data = Business(
+                                name=name, category=category, city=city, 
+                                address=url # Fallback or parse as per your Business class
+                            )
+                            business_list.business_list.append(data)
+
+                            # --- SYNC PROGRESS WITH FRONTEND ---
+                            task.total_found = i + 1
+                            # Har item par progress update hogi
+                            task.progress = int(((i + 1) / len(business_urls)) * 100)
+                            db.session.commit()
+
+                        except: continue
+
+                    # Batch Save
+                    business_list.save_to_mysql()
+                    task.last_index = search_for_index + 1
+                    db.session.commit()
+
+                task.status = "COMPLETED"
+                task.progress = 100
+                db.session.commit()
+
             except Exception as e:
-                print("CSV Save Error:", e)
-
-            try:
-                business_list.save_to_mysql()
-                print("MySQL Save Done")
-            except Exception as e:
-                print("MySQL Save Error:", e)
-
-
-        browser.close()
-
+                print(f"Scraper Error: {e}")
+                task.status = "ERROR"
+                task.error_message = str(e)
+                db.session.commit()
+            finally:
+                if browser: browser.close()
+@app.route('/api/tasks/<int:task_id>', methods=['DELETE'])
+def delete_task(task_id):
+    task = ScraperTask.query.get(task_id)
+    if task:
+        db.session.delete(task)
+        db.session.commit()
+        return jsonify({"message": "Task deleted successfully"}), 200
+    return jsonify({"error": "Task not found"}), 404
 
 @app.route('/api/scrape', methods=['POST'])
-def api_scrape():
+def start_deep_scrape():
     data = request.json
-    if not data or 'queries' not in data:
-        return jsonify({'error': 'Missing queries'}), 400
-    
-    search_list = []
-    for line in data['queries']:
-        parts = [part.strip() for part in line.split(',')]
-        if len(parts) == 3:
-            search_list.append({
-                "category": parts[0],
-                "city": parts[1],
-                "state": parts[2]
-            })
-    
-    if not search_list:
-        return jsonify({'error': 'No valid queries provided'}), 400
+    category = data.get('category')
+    city = data.get('city')
+    platform = data.get('platform', 'Google Maps')
 
-    thread = threading.Thread(target=run_scraper, args=(search_list,))
+    # 1. Database mein task create karo
+    new_task = ScraperTask(
+        platform=platform,
+        search_query=f"{category} in {city}",
+        location=city,
+        status="starting"
+    )
+    db.session.add(new_task)
+    db.session.commit()
+
+    # 2. Scraper Thread start karo (task_id pass karke)
+    thread = threading.Thread(target=run_scraper, args=(new_task.id,))
     thread.start()
-    
-    return jsonify({
-        'status': 'Scraping started',
-        'searches': len(search_list)
-    }), 202
+
+    return jsonify({"message": "Deep Scraper Started", "task_id": new_task.id}), 202
 
 @app.route('/api/results', methods=['GET'])
 def api_results():
@@ -435,7 +464,12 @@ def api_results():
         cursor = connection.cursor(dictionary=True)
         cursor.execute("SELECT * FROM google_Map LIMIT 1000")
         results = cursor.fetchall()
-        return jsonify(results)
+        return jsonify({
+    "status": "success",
+    "data": results,
+    "total_count": len(results),
+    "total_pages": 1
+})
     except Error as e:
         print("Error connecting to database:", e)
         return jsonify({'error': str(e)}), 500
@@ -482,7 +516,7 @@ def main():
 DB_CONFIG_AMAZON = {
     'host': os.getenv('DB_HOST'),
     'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD_PLAIN'),
+   'password': os.getenv('DB_PASSWORD'),
     'database': os.getenv('DB_NAME'),
     'port': os.getenv('DB_PORT')
 }
@@ -514,16 +548,18 @@ def get_product_details(url):
         response.raise_for_status()
         if 'captcha' in response.text.lower():
             raise Exception("Captcha page encountered")
+        
         soup = BeautifulSoup(response.text, 'html.parser')
-        asin = url.split('/dp/')[1].split('/')[0] if '/dp/' in url else None
-        title_selectors = [
-            "#productTitle",
-            "span.a-size-large.product-title-word-break",
-            "h1.a-size-large.a-spacing-none",
-            "span#title",
-            "h1#title",
-        ]
+        
+        # ASIN Logic
+        asin = None
+        if '/dp/' in url:
+             asin = url.split('/dp/')[1].split('/')[0].split('?')[0]
+        elif '/gp/product/' in url:
+             asin = url.split('/gp/product/')[1].split('/')[0].split('?')[0]
 
+        # Title Logic
+        title_selectors = ["#productTitle", "span.a-size-large", "span#title"]
         name = None
         for selector in title_selectors:
             elem = soup.select_one(selector)
@@ -531,62 +567,47 @@ def get_product_details(url):
                 name = elem.get_text().strip()
                 break
 
-        if not name:
-            print("Title not found for:", url)
-        price = soup.select_one('.a-price-whole')
-        price = price.get_text().strip() if price else None
-        if price:
-            price = '₹' + price.replace(',', '')
-        rating = soup.select_one('span[data-asin][class*="a-icon-alt"]')
-        if not rating:
-            rating = soup.select_one('.a-icon-alt')
-        rating = rating.get_text().split()[0] if rating else None
-        num_ratings = soup.select_one('#acrCustomerReviewText')
-        num_ratings = num_ratings.get_text().split()[0].replace(',', '') if num_ratings else 0
-        brand = soup.select_one('#bylineInfo')
-        brand = brand.get_text().strip() if brand else None
-        seller = None  # Seller info extraction can be added if needed
-        category = None
-        subcategory = None
-        sub_sub_category = None
-        category_sub_sub_sub = None
-        colour = None
-        size_options = None
-        description = None
-        link = url
-        image_urls = []
-        about_bullet = []
-        product_details = {}
-        additional_details = {}
-        manufacturer_name = None
-        # Add more extraction logic as needed
+        # Price Logic
+        price_elem = soup.select_one('.a-price-whole')
+        price = '₹' + price_elem.get_text().strip().replace(',', '') if price_elem else None
+        
+        # Rating Logic
+        rating_elem = soup.select_one('span[data-asin][class*="a-icon-alt"]')
+        if not rating_elem: rating_elem = soup.select_one('.a-icon-alt')
+        rating = rating_elem.get_text().split()[0] if rating_elem else None
+        
+        # --- FIXED NUM_RATINGS LOGIC ---
+        num_ratings_elem = soup.select_one('#acrCustomerReviewText')
+        if num_ratings_elem:
+            raw_text = num_ratings_elem.get_text()
+            # Sirf digits rakho (brackets '(' aur comma ',' sab nikal jayenge)
+            clean_num = ''.join(filter(str.isdigit, raw_text))
+            num_ratings = int(clean_num) if clean_num else 0
+        else:
+            num_ratings = 0
+        # ------------------------------
+
+        brand_elem = soup.select_one('#bylineInfo')
+        brand = brand_elem.get_text().strip() if brand_elem else None
+
         return {
             'ASIN': asin,
             'Product_name': name,
             'price': price,
             'rating': float(rating) if rating else None,
-            'Number_of_ratings': int(num_ratings) if num_ratings else 0,
+            'Number_of_ratings': num_ratings, # Ab ye crash nahi hoga
             'Brand': brand,
-            'Seller': seller,
-            'category': category,
-            'subcategory': subcategory,
-            'sub_sub_category': sub_sub_category,
-            'category_sub_sub_sub': category_sub_sub_sub,
-            'colour': colour,
-            'size_options': size_options,
-            'description': description,
-            'link': link,
-            'Image_URLs': ' | '.join(image_urls) if image_urls else None,
-            'About_the_items_bullet': ' | '.join(about_bullet) if about_bullet else None,
-            'Product_details': json.dumps(product_details),
-            'Additional_Details': json.dumps(additional_details),
-            'Manufacturer_Name': manufacturer_name
+            'Seller': None, 'category': None, 'subcategory': None,
+            'sub_sub_category': None, 'category_sub_sub_sub': None,
+            'colour': None, 'size_options': None, 'description': None,
+            'link': url, 'Image_URLs': None, 'About_the_items_bullet': None,
+            'Product_details': json.dumps({}), 
+            'Additional_Details': json.dumps({}),
+            'Manufacturer_Name': None
         }
     except Exception as e:
         print(f"Error scraping product details: {e}")
         return None
-
-
 def insert_products_to_db(products):
     if not products:
         return 0
@@ -937,7 +958,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.runserver:
-        app.run(debug=True)
+   
+     app.run(host='0.0.0.0', port=8000, debug=True)
     elif args.scrape:
         print(f"Scraping Amazon for '{args.scrape}' ({args.pages} pages)...")
         scraped_products = scrape_amazon_search(args.scrape, args.pages)

@@ -1,7 +1,4 @@
-# model/upload_master_reports_model.py
-
-from sqlalchemy import Column, Integer, String, TIMESTAMP, JSON, Index
-from sqlalchemy.sql import func
+from sqlalchemy import Column, Integer, String, TIMESTAMP, JSON, func
 from extensions import db
 
 class UploadReport(db.Model):
@@ -9,7 +6,6 @@ class UploadReport(db.Model):
 
     id = Column(Integer, primary_key=True)
     task_id = Column(String(36), nullable=False, unique=True, index=True)
-
     status = Column(String(20), nullable=False)
 
     total_processed = Column(Integer, default=0)
@@ -26,5 +22,6 @@ class UploadReport(db.Model):
 
     stats = Column(JSON)
 
-    created_at = Column(TIMESTAMP, server_default=func.now())
-    updated_at = Column(TIMESTAMP, onupdate=func.now())
+    # The Fix
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)

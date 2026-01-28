@@ -17,3 +17,5 @@ pymysql
 celery
 redis
 Flask-Mail
+cryptography
+pymysql

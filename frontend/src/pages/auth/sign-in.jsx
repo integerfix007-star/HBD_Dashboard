@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Input,
   Checkbox,
@@ -5,31 +6,39 @@ import {
   Typography,
 } from "@material-tailwind/react";
 import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
 import api from "../../utils/Api";
+import { useAuth } from "../../context/AuthContext";
+
 
 export function SignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
+  
+  // Context se 'login' function aur current 'token' dono nikale
+  const { login, token } = useAuth(); 
+
+  // --- NEW LOGIC START ---
+  // Page load hote hi check karo: Agar token hai, toh Dashboard bhejo
+  useEffect(() => {
+    if (token) {
+      navigate("/dashboard/home", { replace: true });
+    }
+  }, [token, navigate]);
+  // --- NEW LOGIC END ---
 
   const handleLogin = async (e) => {
     e.preventDefault();
-
     try {
-      const res = await api.post("/login", {
-        email,
-        password,
-      });
-
-      // save token in localStorage
-      localStorage.setItem("token", res.data.token);
-
-      alert("Login successful!");
-      navigate("/dashboard/home"); // redirect to dashboard
+      const res = await api.post("/login", { email, password });
+      
+      // Context wala login use kar rahe hain
+      login(res.data.token); 
+      
+      navigate("/dashboard/home");
     } catch (err) {
       console.error(err);
-      alert("Invalid email or password");
+      alert(err.response?.data?.msg || "Invalid email or password");
     }
   };
 
@@ -65,11 +74,9 @@ export function SignIn() {
                 size="lg"
                 type="email"
                 label="Email"
-                
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-               
               />
             </div>
 
@@ -85,11 +92,9 @@ export function SignIn() {
                 size="lg"
                 type="password"
                 label="Password"
-                
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-               
               />
             </div>
           </div>
@@ -139,4 +144,4 @@ export function SignIn() {
   );
 }
 
-// export default SignIn;
+export default SignIn;
