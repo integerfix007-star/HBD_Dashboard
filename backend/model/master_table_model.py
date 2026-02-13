@@ -9,7 +9,6 @@ class MasterTable(db.Model):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     global_business_id = Column(String(100), index=True, unique=True, nullable=False)
-    business_id = Column(String(100), index=True, nullable=True)
     business_name= Column(String(255), nullable=True)
     business_category= Column(String(100), index=True, nullable=True)
     business_subcategory= Column(String(100), nullable=True)
@@ -60,7 +59,6 @@ class MasterTable(db.Model):
         return {
             "id": self.id,
             "global_business_id": self.global_business_id,
-            "business_id": self.business_id,
             "business_name": self.business_name,
             "business_category": self.business_category,
             "business_subcategory": self.business_subcategory,
