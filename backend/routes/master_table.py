@@ -1,4 +1,6 @@
 from flask import Blueprint, jsonify, request
+import redis
+import os
 from sqlalchemy import func, or_, text
 from model.master_table_model import MasterTable
 from database.session import get_db_session
@@ -6,6 +8,17 @@ from utils.storage import get_upload_base_dir
 from werkzeug.utils import secure_filename
 from tasks.upload_master_task import process_master_upload_task
 from model.upload_master_reports_model import UploadReport
+
+
+# Setup Redis connection (Docker Compose: use 'redis' hostname)
+# Prefer REDIS_URL, fallback to CELERY_BROKER_URL, then default
+REDIS_URL = os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL") or "redis://redis:6379/0"
+try:
+    redis_client = redis.Redis.from_url(REDIS_URL)
+    redis_client.ping()
+except Exception:
+    redis_client = None
+
 
 master_table_bp = Blueprint("master_table", __name__)
 
@@ -72,98 +85,107 @@ def get_upload_report(task_id):
 @master_table_bp.route("/master-dashboard-stats", methods=["GET"])
 def get_master_dashboard_stats():
     session = get_db_session()
-    task_id = request.args.get('task_id')
-    
-    where_clause = "WHERE 1=1"
-    params = {}
-    
-    if task_id:
-        where_clause += " AND task_id = :task_id"
-        params['task_id'] = task_id
-
     try:
-        # 1. Total Records
-        total_query = text(f"SELECT COUNT(*) FROM master_table {where_clause}")
-        total_records = session.execute(total_query, params).scalar()
+        limit = request.args.get("limit", 10, type=int)
+        cursor = request.args.get("cursor", type=int)
+        limit = max(1, min(limit, 50))
 
-        # 2. Distinct Counts
-        counts_query = text(f"""
-            SELECT 
-                COUNT(DISTINCT city) as total_cities,
-                COUNT(DISTINCT area) as total_areas,
-                COUNT(DISTINCT category) as total_categories
-            FROM master_table {where_clause}
-        """)
-        counts_result = session.execute(counts_query, params).fetchone()
+        # Use limit/cursor as part of cache key
+        cache_key = f"master_dashboard_stats:limit={limit}:cursor={cursor}"
+        if redis_client:
+            cached = redis_client.get(cache_key)
+            if cached:
+                print(f"[Redis] Cache hit for key: {cache_key}")
+                import json
+                return jsonify(json.loads(cached))
+            else:
+                print(f"[Redis] Cache miss for key: {cache_key}")
 
-        # 3. City Match Status
-        match_status_query = text(f"""
-            SELECT 
-                SUM(CASE WHEN city IS NOT NULL AND city != '' THEN 1 ELSE 0 END) as matched,
-                SUM(CASE WHEN city IS NULL OR city = '' THEN 1 ELSE 0 END) as unmatched
-            FROM master_table {where_clause}
-        """)
-        match_status = session.execute(match_status_query, params).fetchone()
+        query = session.query(MasterTable).order_by(MasterTable.id.desc())
+        if cursor is not None:
+            query = query.filter(MasterTable.id < cursor)
+        rows = query.limit(limit).all()
 
-        # 4. Missing Values
-        missing_query = text(f"""
-            SELECT 
-                SUM(CASE WHEN phone IS NULL OR phone = '' THEN 1 ELSE 0 END) as missing_phone,
-                SUM(CASE WHEN email IS NULL OR email = '' THEN 1 ELSE 0 END) as missing_email,
-                SUM(CASE WHEN address IS NULL OR address = '' THEN 1 ELSE 0 END) as missing_address
-            FROM master_table {where_clause}
-        """)
-        missing_stats = session.execute(missing_query, params).fetchone()
+        # Compute stats only for these rows
+        total_records = len(rows)
+        cities = set()
+        areas = set()
+        categories = set()
+        matched = 0
+        unmatched = 0
+        missing_phone = 0
+        missing_email = 0
+        missing_address = 0
+        city_counts_dict = {}
+        category_counts_dict = {}
+        source_stats_dict = {}
+        combo_counts_dict = {}
 
-        # 5. Top 5 Cities
-        city_counts_query = text(f"""
-            SELECT city, COUNT(*) as count 
-            FROM master_table {where_clause} 
-            GROUP BY city 
-            ORDER BY count DESC LIMIT 5
-        """)
-        city_counts = [dict(row._mapping) for row in session.execute(city_counts_query, params)]
+        for row in rows:
+            city = getattr(row, 'city', None)
+            area = getattr(row, 'area', None)
+            category = getattr(row, 'business_category', None)
+            data_source = getattr(row, 'data_source', None)
+            phone = getattr(row, 'primary_phone', None)
+            email = getattr(row, 'email', None)
+            address = getattr(row, 'address', None)
 
-        # 6. Top 5 Categories
-        cat_counts_query = text(f"""
-            SELECT category, COUNT(*) as count 
-            FROM master_table {where_clause} 
-            GROUP BY category 
-            ORDER BY count DESC LIMIT 5
-        """)
-        category_counts = [dict(row._mapping) for row in session.execute(cat_counts_query, params)]
+            if city: cities.add(city)
+            if area: areas.add(area)
+            if category: categories.add(category)
 
-        # 7. Source Stats
-        source_query = text(f"""
-            SELECT source, COUNT(*) as count 
-            FROM master_table {where_clause} 
-            GROUP BY source 
-            ORDER BY count DESC
-        """)
-        source_stats = [dict(row._mapping) for row in session.execute(source_query, params)]
+            if city and city.strip():
+                matched += 1
+            else:
+                unmatched += 1
 
-        # 8. Top City + Category Combinations
-        top_combo_query = text(f"""
-            SELECT city, category, COUNT(*) as count
-            FROM master_table {where_clause}
-            GROUP BY city, category
-            ORDER BY count DESC LIMIT 10
-        """)
-        top_city_categories = [dict(row._mapping) for row in session.execute(top_combo_query, params)]
+            if not phone or not phone.strip():
+                missing_phone += 1
+            if not email or not email.strip():
+                missing_email += 1
+            if not address or not address.strip():
+                missing_address += 1
+
+            # City counts
+            if city:
+                city_counts_dict[city] = city_counts_dict.get(city, 0) + 1
+            # Category counts
+            if category:
+                category_counts_dict[category] = category_counts_dict.get(category, 0) + 1
+            # Source stats
+            if data_source:
+                source_stats_dict[data_source] = source_stats_dict.get(data_source, 0) + 1
+            # City+Category combo
+            if city and category:
+                combo_key = (city, category)
+                combo_counts_dict[combo_key] = combo_counts_dict.get(combo_key, 0) + 1
+
+        city_counts = [
+            {"city": k, "count": v} for k, v in sorted(city_counts_dict.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+        category_counts = [
+            {"category": k, "count": v} for k, v in sorted(category_counts_dict.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+        source_stats = [
+            {"source": k, "count": v} for k, v in sorted(source_stats_dict.items(), key=lambda x: x[1], reverse=True)
+        ]
+        top_city_categories = [
+            {"city": k[0], "category": k[1], "count": v} for k, v in sorted(combo_counts_dict.items(), key=lambda x: x[1], reverse=True)[:10]
+        ]
 
         stats = {
             "total_records": total_records,
-            "total_cities": counts_result.total_cities,
-            "total_areas": counts_result.total_areas,
-            "total_categories": counts_result.total_categories,
+            "total_cities": len(cities),
+            "total_areas": len(areas),
+            "total_categories": len(categories),
             "city_match_status": {
-                "matched": int(match_status.matched or 0),
-                "unmatched": int(match_status.unmatched or 0)
+                "matched": matched,
+                "unmatched": unmatched
             },
             "missing_values": {
-                "missing_phone": int(missing_stats.missing_phone or 0),
-                "missing_email": int(missing_stats.missing_email or 0),
-                "missing_address": int(missing_stats.missing_address or 0)
+                "missing_phone": missing_phone,
+                "missing_email": missing_email,
+                "missing_address": missing_address
             },
             "city_counts": city_counts,
             "category_counts": category_counts,
@@ -171,15 +193,20 @@ def get_master_dashboard_stats():
             "top_city_categories": top_city_categories
         }
 
-        return jsonify({"status": "COMPLETED", "stats": stats})
+        # Cache the result for 60 seconds
+        import json
+        if redis_client:
+            redis_client.setex(cache_key, 60, json.dumps({"status": "COMPLETED", "stats": stats}))
+            print(f"[Redis] Cached stats for key: {cache_key} (TTL: 60s)")
 
+        return jsonify({"status": "COMPLETED", "stats": stats})
     except Exception as e:
         print(f"Error fetching dashboard stats: {e}")
         return jsonify({"status": "ERROR", "message": str(e)}), 500
     finally:
         session.close()
 
-@master_table_bp.route("/master_table/list", methods=["GET"])
+@master_table_bp.route("/master_table/table", methods=["GET"])
 def get_master_table_list():
     session = get_db_session()
     try:
@@ -189,7 +216,7 @@ def get_master_table_list():
         limit = max(1, min(limit, 50))
 
         query = session.query(MasterTable).order_by(MasterTable.id.desc())
-        if cursor:
+        if cursor is not None:
             query = query.filter(MasterTable.id < cursor)
 
         rows = query.limit(limit + 1).all()
@@ -198,7 +225,7 @@ def get_master_table_list():
         rows = rows[:limit]
 
         data = [row.to_dict() for row in rows]
-        next_cursor = data[-1]["id"] if has_next else None
+        next_cursor = rows[-1].id if rows and has_next else None
 
         return jsonify({
             "limit": limit,
@@ -206,5 +233,8 @@ def get_master_table_list():
             "has_next": has_next,
             "data": data
         })
+    except Exception as e:
+        print(f"Error fetching master table list: {e}")
+        return jsonify({"error": "Internal Server Error"}), 500
     finally:
         session.close()
