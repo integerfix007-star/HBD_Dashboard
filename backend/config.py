@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 from datetime import timedelta
+import urllib.parse  # Added for password encoding
 
 load_dotenv()
 
@@ -10,18 +11,25 @@ class Config:
     if not SECRET_KEY:
         raise ValueError("SECRET_KEY must be set in .env file")
 
-    # Database configuration
+    # --- Database configuration (FIXED for special characters) ---
+    DB_USER = os.getenv('DB_USER')
+    # Use quote_plus to handle '@' or other special chars in the password
+    DB_PASSWORD = urllib.parse.quote_plus(os.getenv('DB_PASSWORD', ''))
+    DB_HOST = os.getenv('DB_HOST')
+    DB_PORT = os.getenv('DB_PORT', '3306')
+    DB_NAME = os.getenv('DB_NAME')
+
     SQLALCHEMY_DATABASE_URI = (
-        f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
-        f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT','3306')}/{os.getenv('DB_NAME')}"
+        f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     )
+    
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_recycle": 280,
         "pool_pre_ping": True, # Checks if DB is alive before the query
     }
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # --- JWT CONFIGURATION (FIXED) ---
+    # --- JWT CONFIGURATION ---
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
     if not JWT_SECRET_KEY:
         raise ValueError("JWT_SECRET_KEY must be set in .env file")
@@ -29,13 +37,13 @@ class Config:
     # 1. Store token in cookies (Auto-login)
     JWT_TOKEN_LOCATION = ['cookies']
 
-    # 2. Allow cookies over HTTP (Change to True if using HTTPS)
-    JWT_COOKIE_SECURE = False 
+    # 2. Set to True because your live site uses HTTPS
+    JWT_COOKIE_SECURE = True 
 
-    # 3. Disable CSRF for now (To prevent "Missing CSRF" errors during login)
+    # 3. Disable CSRF for now
     JWT_COOKIE_CSRF_PROTECT = False
 
-    # 4. Session Timeout: Increased from 30 mins to 30 DAYS
+    # 4. Session Timeout: 30 DAYS
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=30) 
 
     # Mail configuration

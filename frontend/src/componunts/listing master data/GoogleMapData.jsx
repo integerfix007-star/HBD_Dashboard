@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
+import api from "@/utils/Api"; // Using your standard API wrapper
 import {
   Button,
   Card,
@@ -15,14 +16,14 @@ import {
 } from "@heroicons/react/24/solid";
 import * as XLSX from "xlsx/dist/xlsx.full.min.js";
 
+// Define columns to match your backend response
 const googleMapColumns = [
-  { key: "name", label: "Business Name", width: 220 },
-  { key: "address", label: "Address", width: 320 },
-  { key: "phone_number", label: "Contact No", width: 140 },
-  { key: "category", label: "Category", width: 160 },
+  { key: "name", label: "Business Name", width: 250 },
+  { key: "address", label: "Address", width: 350 },
+  { key: "phone_number", label: "Contact No", width: 150 },
+  { key: "category", label: "Category", width: 180 },
   { key: "city", label: "City", width: 120 },
-  { key: "area", label: "Area", width: 140 },
-  { key: "pincode", label: "Pincode", width: 100 },
+  { key: "rating", label: "Rating", width: 100 },
 ];
 
 const GoogleMapData = () => {
@@ -42,25 +43,27 @@ const GoogleMapData = () => {
     setError(null);
     try {
       const queryParams = new URLSearchParams({
-        source: "google-maps", // Explicitly requesting Google Maps source data
         page: currentPage,
         limit: limit,
         search: search,
         city: citySearch,
       });
 
-      const response = await fetch(`http://localhost:5000/?${queryParams}`);
-      
-      if (!response.ok) throw new Error("Backend connection failed");
+      // CORRECT API CALL: 
+      // api utility adds base URL, so we just need "/google-listings"
+      const response = await api.get(`/google-listings?${queryParams}`);
+      const result = response.data;
 
-      const result = await response.json();
-      
       setPageData(result.data || []);
       setTotalPages(result.total_pages || 1);
       setTotalRecords(result.total_count || 0);
     } catch (err) {
       console.error("Fetch Error:", err);
-      setError("Failed to Fetch data from backend");
+      if (err.code === "ERR_NETWORK") {
+        setError("Backend offline. Check connection.");
+      } else {
+        setError("Failed to fetch Google Map data.");
+      }
     } finally {
       setLoading(false);
     }
@@ -70,20 +73,18 @@ const GoogleMapData = () => {
     fetchGoogleMapData();
   }, [fetchGoogleMapData]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, citySearch]);
-
+  // Handle Export
   const exportToExcel = () => {
     if (!pageData.length) return;
     const ws = XLSX.utils.json_to_sheet(pageData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "GoogleMaps_Data");
-    XLSX.writeFile(wb, `GoogleMaps_Page_${currentPage}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "GoogleMap_Data");
+    XLSX.writeFile(wb, `GoogleMap_Data_Page_${currentPage}.xlsx`);
   };
 
   return (
     <div className="min-h-screen mt-8 mb-12 px-4 rounded bg-white text-black">
+      {/* Header Section */}
       <div className="flex justify-between items-end mb-6">
         <div>
           <Typography variant="h4" className="font-bold text-blue-gray-900">
@@ -93,7 +94,7 @@ const GoogleMapData = () => {
             {error ? (
               <span className="text-red-500 font-bold">{error}</span>
             ) : (
-              `Displaying verified records from Google Maps (${totalRecords} total)`
+              `Displaying verified Google Map records (${totalRecords} total)`
             )}
           </Typography>
         </div>
@@ -126,14 +127,20 @@ const GoogleMapData = () => {
                 <Input 
                   label="Search Business Name" 
                   value={search} 
-                  onChange={(e) => setSearch(e.target.value)} 
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setCurrentPage(1); 
+                  }} 
                 />
               </div>
               <div className="w-48">
                 <Input 
                   label="Filter by City" 
                   value={citySearch} 
-                  onChange={(e) => setCitySearch(e.target.value)} 
+                  onChange={(e) => {
+                    setCitySearch(e.target.value);
+                    setCurrentPage(1); 
+                  }} 
                 />
               </div>
             </div>
@@ -169,7 +176,7 @@ const GoogleMapData = () => {
             <div className="flex flex-col justify-center py-24 items-center gap-4">
               <Spinner className="h-10 w-10 text-blue-500" />
               <Typography className="animate-pulse font-medium text-gray-600">
-                Synchronizing with Master Table...
+                Loading Google Map Data...
               </Typography>
             </div>
           ) : (
@@ -210,7 +217,7 @@ const GoogleMapData = () => {
                   <tr>
                     <td colSpan={googleMapColumns.length} className="p-20 text-center">
                       <Typography variant="h6" color="blue-gray" className="opacity-40 italic">
-                        {error || "No records found for the selected filters"}
+                        {error || "No Google Map records found."}
                       </Typography>
                     </td>
                   </tr>

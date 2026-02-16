@@ -5,41 +5,41 @@ from flask_jwt_extended import verify_jwt_in_request
 from dotenv import load_dotenv
 
 from config import Config
-from extensions import db, jwt, cors, mail,migrate
+from extensions import db, jwt, cors, mail, migrate
 
 # --- Import Models ---
 from model.user import User
 from model.scraper_task import ScraperTask
 from model.amazon_product_model import AmazonProduct
-from model.googlemap_data import GooglemapData
+from model.googlemap_data import GoogleMapData # Correct Import
 from model.item_csv_model import ItemData
 from model.master_table_model import MasterTable
 from model.upload_master_reports_model import UploadReport
 from model.listing_master import ListingMaster
 
-# ADDED IMPORTS TO PROTECT EXISTING TABLES:
+# Existing Models
 from model.asklaila import Asklaila
 from model.atm import ATM
 from model.bank import Bank
 from model.college_dunia import CollegeDunia
+
 # --- Import Blueprints ---
 from routes.auth_route import auth_bp
 from routes.scraper_routes import scraper_bp
 from routes.amazon_routes import amazon_api_bp
-from routes.googlemap import googlemap_bp
+from routes.googlemap import googlemap_bp # Correct Import
 from routes.master_table import master_table_bp
 from routes.upload_product_csv import product_csv_bp
 from routes.upload_item_csv import item_csv_bp
 from routes.amazon_product import amazon_products_bp
 
-# items data complate/incomplate
+# Listing & Product Blueprints imports
 from routes.items_data import item_bp
 from routes.item_csv_download import item_csv_bp as item_csv_download_bp
 from routes.item_duplicate import item_duplicate_bp
 from routes.upload_others_csv import upload_others_csv_bp
 from routes.listing_master_route import listing_master_bp
 
-# Listing & Product Blueprints
 from routes.listing_routes.upload_asklaila_route import asklaila_bp
 from routes.listing_routes.upload_atm_route import atm_bp
 from routes.listing_routes.upload_bank_route import bank_bp
@@ -65,21 +65,16 @@ from routes.product_routes.upload_flipkart_products_route import flipkart_bp
 from routes.product_routes.upload_india_mart_route import indiamart_bp
 from routes.product_routes.upload_jio_mart_route import jiomart_bp
 
-
 # --- Initialize App ---
 load_dotenv()
 app = Flask(__name__)
 app.config.from_object(Config)
 
-
 # Init extensions
 db.init_app(app)
 migrate.init_app(app, db)
 jwt.init_app(app)
-
-# 1. FIX CORS: Explicitly allow frontend origin
-cors.init_app(app, resources={r"/*": {"origins": "http://localhost:5173"}}, supports_credentials=True)
-
+cors.init_app(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True) # Allow all origins for dev
 mail.init_app(app)
 
 with app.app_context():
@@ -100,6 +95,7 @@ PUBLIC_ROUTES = [
     "/api/bank/fetch-data",
     "/asklaila/fetch-data",
     "/college-dunia/fetch-data",
+    "/api/google-listings", # Allow public access to Google Listings
 ]
 
 @app.before_request
@@ -107,9 +103,7 @@ def protect_all_routes():
     if request.method == "OPTIONS":
         return jsonify({"message": "CORS preflight successful"}), 200
         
-    # Standardize the path by removing trailing slashes for the check
     normalized_path = request.path.rstrip('/')
-    # Standardize the public routes list too
     normalized_public_routes = [route.rstrip('/') for route in PUBLIC_ROUTES]
     
     if normalized_path in normalized_public_routes or request.path in PUBLIC_ROUTES:
@@ -120,11 +114,15 @@ def protect_all_routes():
     except Exception as e:
         print(f"❌ JWT REJECTED for {request.path}: {str(e)}") 
         return jsonify({"message": "Missing or invalid token", "error": str(e)}), 401
+
 # --- Register Main Blueprints ---
 app.register_blueprint(auth_bp, url_prefix="/auth")
 app.register_blueprint(scraper_bp, url_prefix="/api")
 app.register_blueprint(amazon_api_bp, url_prefix="/api")
-app.register_blueprint(googlemap_bp)
+
+# CORRECT REGISTRATION FOR GOOGLE MAPS
+app.register_blueprint(googlemap_bp, url_prefix='/api') 
+
 app.register_blueprint(master_table_bp)
 app.register_blueprint(product_csv_bp)
 app.register_blueprint(item_csv_bp)
@@ -136,7 +134,6 @@ app.register_blueprint(upload_others_csv_bp)
 app.register_blueprint(listing_master_bp, url_prefix="/api")
 
 # --- Register Listing & Product Blueprints (Batch) ---
-# NOTE: atm_bp, bank_bp, and college_dunia_bp are already here!
 blueprints_listing = [
     (asklaila_bp, "/asklaila"), (atm_bp, "/atm"), (bank_bp, "/bank"),
     (college_dunia_bp, "/college-dunia"), (freelisting_bp, "/freelisting"),

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
+import api from "@/utils/Api"; // Using your standard API wrapper
 import {
   Button,
   Card,
@@ -42,25 +43,28 @@ const GoogleData = () => {
     setError(null);
     try {
       const queryParams = new URLSearchParams({
-        source: "google", // Explicitly requesting Google source data
         page: currentPage,
         limit: limit,
         search: search,
         city: citySearch,
       });
 
-      const response = await fetch(`http://localhost:5000/?${queryParams}`);
-      
-      if (!response.ok) throw new Error("Backend connection failed");
+      // Using the api utility instead of hardcoded fetch
+      // Note: We used url_prefix='/api' in app.py, so we include it here
+      const response = await api.get(`/google-listings?${queryParams}`);
+      const result = response.data;
 
-      const result = await response.json();
-      
       setPageData(result.data || []);
       setTotalPages(result.total_pages || 1);
       setTotalRecords(result.total_count || 0);
     } catch (err) {
       console.error("Fetch Error:", err);
-      setError("Failed to Fetch data from backend");
+      // Standardized error handling from your AtmData example
+      if (err.code === "ERR_NETWORK") {
+        setError("Backend offline. Check Docker logs or Network.");
+      } else {
+        setError("Failed to fetch Google data.");
+      }
     } finally {
       setLoading(false);
     }
@@ -69,10 +73,6 @@ const GoogleData = () => {
   useEffect(() => {
     fetchGoogleData();
   }, [fetchGoogleData]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, citySearch]);
 
   const exportToExcel = () => {
     if (!pageData.length) return;
@@ -126,14 +126,20 @@ const GoogleData = () => {
                 <Input 
                   label="Search Business Name" 
                   value={search} 
-                  onChange={(e) => setSearch(e.target.value)} 
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setCurrentPage(1); // Reset page on search
+                  }} 
                 />
               </div>
               <div className="w-48">
                 <Input 
                   label="Filter by City" 
                   value={citySearch} 
-                  onChange={(e) => setCitySearch(e.target.value)} 
+                  onChange={(e) => {
+                    setCitySearch(e.target.value);
+                    setCurrentPage(1); // Reset page on filter
+                  }} 
                 />
               </div>
             </div>
