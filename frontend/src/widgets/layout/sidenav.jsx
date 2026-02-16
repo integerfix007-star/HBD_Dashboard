@@ -18,8 +18,8 @@ export function Sidenav({ brandImg, brandName, routes }) {
   const [controller, dispatch] = useMaterialTailwindController();
   const { sidenavColor, sidenavType, openSidenav } = controller;
 
-  const [openDropdown, setOpenDropdown] = useState(null);
-  const [openSubDropdown, setOpenSubDropdown] = useState(null);
+  const [openDropdown, setOpenDropdown] = useState(null);      
+  const [openSubDropdown, setOpenSubDropdown] = useState(null); 
 
   const location = useLocation();
 
@@ -66,12 +66,6 @@ export function Sidenav({ brandImg, brandName, routes }) {
 
   const renderMenu = (items, level = 0, layout = "", parentPath = "") => {
     return items.map((item) => {
-      // --- MODIFICATION START: Filter out 'sign up' ---
-      if (item.name && item.name.toLowerCase() === "sign up") {
-        return null;
-      }
-      // --- MODIFICATION END ---
-
       const isParent = item.children && item.children.length > 0;
       const isSecondLevel = level === 0;
       const isThirdLevel = level === 1;
@@ -101,7 +95,7 @@ export function Sidenav({ brandImg, brandName, routes }) {
               >
                 {item.icon}
                 <Typography color="inherit" className="font-medium capitalize truncate">
-                  {item.name || ""}
+                  {item.name}
                 </Typography>
                 <span className="ml-auto">
                   {isOpen ? <ChevronUpIcon className="w-4 h-4" /> : <ChevronDownIcon className="w-4 h-4" />}
@@ -120,7 +114,7 @@ export function Sidenav({ brandImg, brandName, routes }) {
                   variant={isActive ? "gradient" : "text"}
                   color={
                     isActive
-                      ? (sidenavColor === "dark" ? "gray" : sidenavColor) 
+                      ? sidenavColor
                       : sidenavType === "dark"
                       ? "white"
                       : "blue-gray"
@@ -130,7 +124,7 @@ export function Sidenav({ brandImg, brandName, routes }) {
                 >
                   {item.icon}
                   <Typography color="inherit" className="font-medium capitalize">
-                    {item.name || ""}
+                    {item.name}
                   </Typography>
                 </Button>
               )}
@@ -147,6 +141,26 @@ export function Sidenav({ brandImg, brandName, routes }) {
         openSidenav ? "translate-x-0" : "-translate-x-80"
       } fixed inset-y-0 left-0 z-50 my-4 ml-4 w-72 rounded-xl transition-transform duration-300 xl:translate-x-0 border border-blue-gray-100 flex flex-col`}
     >
+      <div className="relative flex-shrink-0">
+        <Link to="/" className="py-4 px-8 text-center block">
+          <Typography
+            variant="h6"
+            color={sidenavType === "dark" ? "white" : "blue-gray"}
+          >
+            {brandName}
+          </Typography>
+        </Link>
+        <IconButton
+          variant="text"
+          color={sidenavType === "dark" ? "white" : "blue-gray"}
+          size="sm"
+          ripple={false}
+          className="absolute right-0 top-0 grid rounded-br-none rounded-tl-none xl:hidden"
+          onClick={() => setOpenSidenav(dispatch, false)}
+        >
+          <XMarkIcon strokeWidth={2.5} className="h-5 w-5" />
+        </IconButton>
+      </div>
 
       <div className="flex-1 overflow-y-auto m-4 pr-2 no-scrollbar">
         {routes.map(({ layout, title, pages }, key) => (

@@ -12,13 +12,8 @@ import {
   XCircleIcon,
   DocumentTextIcon,
   ArrowUpTrayIcon,
-  ChartBarIcon,
-  
 } from "@heroicons/react/24/solid";
 
-
-
-import MasterDataUploader from "./componunts/data import/MasterDataUploader";
 import MasterDataRegistry from "./componunts/masterdata/MasterDataRegistry";
 import { Home } from "./pages/dashboard/home";
 import { Profile } from "./pages/dashboard/profile";
@@ -27,10 +22,10 @@ import { Notifications } from "./pages/dashboard/notifications";
 import ZomatoData from "./componunts/product master data/ZomatoData";
 import CitiesReports from "./componunts/Reports/cities_reports";
 import CategoriesReports from "./componunts/Reports/categories_reports";
-
+// --- NEW REPORT IMPORTS ---
 import CitiesPendingReport from "./componunts/Reports/CitiesPendingReport";
 import CategoriesPendingReport from "./componunts/Reports/CategoriesPendingReport";
-
+// --------------------------
 import BusinessCategory from "./componunts/masterdata/BusinessCategory";
 import ServiceCategory from "./componunts/masterdata/ServiceCategory";
 import HeyPlacesData from "./componunts/listing master data/HeyPlacesData.jsx";
@@ -40,7 +35,7 @@ import ListingComplete from "./componunts/listing master data/ListingComplate";
 import ListingIncomplate from "./componunts/listing master data/ListingIncomplate";
 import ProductComplete from "./componunts/product master data/ProductComplate";
 import ProductIncomplate from "./componunts/product master data/ProductIncomplate";
-import AmazonData from "./componunts/product master data/AmazonData"; 
+import AmazonData from "./componunts/product master data/AmazonData";
 import FlipkartData from "./componunts/product master data/FlipkartData";
 import BigBasketData from "./componunts/product master data/BigBasket";
 import ServiceComplate from "./componunts/service master data/ServiceComplate";
@@ -61,7 +56,7 @@ import State from "./componunts/masterdata/location msater/State";
 import Country from "./componunts/masterdata/location msater/Country";
 import Area from "./componunts/masterdata/location msater/Area";
 import City from "./componunts/masterdata/location msater/City";
-import GoogleData from "./componunts/listing master data/GoogleData";
+import GoogleData from "./componunts/listing master data/ShikshaData";
 import GoogleMapData from "./componunts/listing master data/GoogleMapData";
 import CollegeDuniaData from "./componunts/listing master data/CollegeDuniaData";
 import MagicPinData from "./componunts/listing master data/MagicPinData";
@@ -112,10 +107,7 @@ import JioMartUploader from "./componunts/data import/product import/JioMartUplo
 import ZeptoUploader from "./componunts/data import/product import/ZeptoUploader";
 import { ScraperManager } from "./layouts/Scrapper_manager";
 import ZomatoUploader from "./componunts/data import/product import/ZomatoUploader";
-import { SignIn } from "./pages/auth/sign-in";
-import { SignUp } from "./pages/auth/sign-up";
-import MasterDataDashboard from "./componunts/MasterDataDashboard";
-import { element } from "prop-types";
+import RawCleanedData from "./componunts/masterdata/RawCleanedData";
 
 const icon = {
   className: "w-5 h-5 text-inherit",
@@ -168,12 +160,6 @@ export const routes = [
         name: "Data Report",
         path: "/home2",
         element: <ReportDashboard />,
-       
-      }, {
-        icon: <ChartBarIcon {...icon}/>,
-        name: "Master Dashboard",
-        path: "/masterdata/dashboard",
-        element: <MasterDataDashboard />,
       },
       // ... (Rest of your code remains unchanged)
       {
@@ -186,12 +172,6 @@ export const routes = [
         icon: <ArrowUpTrayIcon {...icon} />,
         name: "Upload Data",
         children: [
-          {
-            icon: <ServerStackIcon {...icon} />, 
-            name: "Master Data Uploader",
-            path: "/data-imports/master-data-uploader",
-            element: <MasterDataUploader />,
-          },
           {
             icon: <ArrowUpTrayIcon {...icon} />,
             name: "Listing Data",
@@ -360,8 +340,7 @@ export const routes = [
         icon: <TableCellsIcon {...icon} />,
         name: "Clean Master Data",
         children: [
-         
-           {
+          {
             icon: <TableCellsIcon {...icon} />,
             name: "Listing Master",
             path: "/masterdata/clean-listing-master",
@@ -373,7 +352,7 @@ export const routes = [
             path: "/masterdata/clean-product-master",
             element: <CleanProductMaster />,
           },
-        ],    
+        ],
       },
       {
         icon: <TableCellsIcon {...icon} />,
@@ -444,6 +423,12 @@ export const routes = [
             name: "Duplicate Data",
             path: "/masterdata/duplicate-data",
             element: <DuplicateData />,
+          },
+          {
+            icon: <TableCellsIcon {...icon} />,
+            name: "Raw Cleaned Data",
+            path: "/masterdata/raw-cleaned-data",
+            element: <RawCleanedData />,
           }
         ],
       },
@@ -480,13 +465,13 @@ export const routes = [
             name: "College Dunia Data",
             path: "listing-master-data/college-dunia-data",
             element: <CollegeDuniaData />,
-          }, 
+          },
           {
             icon: <TableCellsIcon {...icon} />,
             name: "Duplicate Data",
             path: "listing-master-data/duplicate-data",
             element: <DuplicateData />,
-          }, 
+          },
           {
             icon: <TableCellsIcon {...icon} />,
             name: "Google Data",
@@ -504,7 +489,7 @@ export const routes = [
             name: "Hey Places Data",
             path: "listing-master-data/hey-places-data",
             element: <HeyPlacesData />,
-          }, 
+          },
           {
             icon: <TableCellsIcon {...icon} />,
             name: "Just Dial Data",
@@ -540,7 +525,7 @@ export const routes = [
             name: "Schoolgis Data",
             path: "listing-master-data/schoolgis-data",
             element: <SchoolgisData />,
-          }, 
+          },
           {
             icon: <TableCellsIcon {...icon} />,
             name: "Shiksha Data",
@@ -697,24 +682,6 @@ export const routes = [
       },
     ],
   },
-  {
-    title: "auth pages",
-    layout: "auth",
-    pages: [
-      {
-        icon: <ServerStackIcon {...icon} />,
-        name: "sign in",
-        path: "/sign-in",
-        element: <SignIn />,
-      },
-      {
-        icon: <RectangleStackIcon {...icon} />,
-        name: "sign up",
-        path: "/sign-up",
-        element: <SignUp />,
-      },
-    ],
-  }
 ];
 
 export default routes;

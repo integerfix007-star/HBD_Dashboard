@@ -23,6 +23,5 @@ services:
       - uploads:/app/tmp/uploads
     depends_on:
       - redis
-
 volumes:
   uploads:
