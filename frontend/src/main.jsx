@@ -15,6 +15,7 @@ import App from "./App";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider } from "@material-tailwind/react";
 import { MaterialTailwindControllerProvider } from "./context";
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import "../public/css/tailwind.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -22,7 +23,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <BrowserRouter>
       <ThemeProvider>
         <MaterialTailwindControllerProvider>
-          <App />
+          {/* REPLACE 'YOUR_GOOGLE_CLIENT_ID' WITH YOUR ACTUAL CLIENT ID from Google Cloud Console */}
+          <GoogleOAuthProvider clientId="572253883337-rl2kplt0q3rk2rgjlojsdlcolv5gvovs.apps.googleusercontent.com">
+            <App />
+          </GoogleOAuthProvider>
         </MaterialTailwindControllerProvider>
       </ThemeProvider>
     </BrowserRouter>

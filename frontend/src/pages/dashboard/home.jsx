@@ -20,10 +20,10 @@ import {
 
 import { StatisticsCard } from "../../widgets/cards/statistics-card.jsx";
 import { StatisticsChart } from "../../widgets/charts/statistics-chart.jsx";
-import{statisticsCardsData} from "../../data/statistics-cards-data.js";
-import{statisticsChartsData} from "../../data/statistics-charts-data.js";
-import { projectsTableData} from "../../data/projects-table-data.js";
-import { ordersOverviewData} from "../../data/orders-overview-data.js"; 
+import { statisticsCardsData } from "../../data/statistics-cards-data.js";
+import { statisticsChartsData } from "../../data/statistics-charts-data.js";
+import { projectsTableData } from "../../data/projects-table-data.js";
+import { ordersOverviewData } from "../../data/orders-overview-data.js";
 import { CheckCircleIcon, ClockIcon } from "@heroicons/react/24/solid";
 
 export function Home() {
@@ -125,11 +125,10 @@ export function Home() {
               <tbody>
                 {projectsTableData.map(
                   ({ img, name, members, budget, completion }, key) => {
-                    const className = `py-3 px-5 ${
-                      key === projectsTableData.length - 1
+                    const className = `py-3 px-5 ${key === projectsTableData.length - 1
                         ? ""
                         : "border-b border-blue-gray-50"
-                    }`;
+                      }`;
 
                     return (
                       <tr key={name}>
@@ -153,9 +152,8 @@ export function Home() {
                                 alt={name}
                                 size="xs"
                                 variant="circular"
-                                className={`cursor-pointer border-2 border-white ${
-                                  key === 0 ? "" : "-ml-2.5"
-                                }`}
+                                className={`cursor-pointer border-2 border-white ${key === 0 ? "" : "-ml-2.5"
+                                  }`}
                               />
                             </Tooltip>
                           ))}
@@ -218,11 +216,10 @@ export function Home() {
               ({ icon, color, title, description }, key) => (
                 <div key={title} className="flex items-start gap-4 py-3">
                   <div
-                    className={`relative p-1 after:absolute after:-bottom-6 after:left-2/4 after:w-0.5 after:-translate-x-2/4 after:bg-blue-gray-50 after:content-[''] ${
-                      key === ordersOverviewData.length - 1
+                    className={`relative p-1 after:absolute after:-bottom-6 after:left-2/4 after:w-0.5 after:-translate-x-2/4 after:bg-blue-gray-50 after:content-[''] ${key === ordersOverviewData.length - 1
                         ? "after:h-0"
                         : "after:h-4/6"
-                    }`}
+                      }`}
                   >
                     {React.createElement(icon, {
                       className: `!w-5 !h-5 ${color}`,

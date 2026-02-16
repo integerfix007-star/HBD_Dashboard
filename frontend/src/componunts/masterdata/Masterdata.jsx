@@ -1,27 +1,18 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import ReusableTable from "../Table/ReusableTable"; 
-import {
-  Card,
-  CardHeader,
-  Typography,
-  CardBody,
-  Input,
-  Button,
-  Spinner,
-} from "@material-tailwind/react";
-import { ChevronUpDownIcon, ArrowPathIcon } from "@heroicons/react/24/solid";
+import api from "../../utils/Api";
 
 const MasterData = () => {
   const [data, setData] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [error, setError] = useState(null);
 
-  const limit = 10;
+  const limit = 1000;
+  const totalPages = Math.ceil(totalRecords / limit);
 
+  // 1. DEFINE COLUMNS ONCE (Easy to reorder or hide)
   const columns = [
     { header: "ID", accessor: "id" },
     { header: "Category", accessor: "category" },
@@ -52,123 +43,78 @@ const MasterData = () => {
     { header: "Cost for Two", accessor: "cost_for_two" },
   ];
 
-  const fetchMasterData = useCallback(async () => {
+  useEffect(() => {
+    fetchData(currentPage, search);
+  }, [currentPage, search]);
+
+  const fetchData = async (page, searchTerm = "") => {
     setLoading(true);
-    setError(null);
     try {
-      const queryParams = new URLSearchParams({
-        source: "master-registry", 
-        page: currentPage,
-        limit: limit,
-        search: search,
-      });
-
-      const response = await fetch(`http://localhost:5000/?${queryParams}`);
-      
-      if (!response.ok) throw new Error("Backend connection failed");
-
-      const result = await response.json();
-      
+      const response = await api.get(
+        `/read_master_input/?page=${page}&limit=${limit}&search=${searchTerm}`
+      );
+   
+      // If 'api.get' returns the JSON directly, remove the .json() line below.
+      const result = await response.json(); 
       setData(result.data || []);
-      setTotalPages(result.total_pages || 1);
-      setTotalRecords(result.total_count || 0);
-    } catch (err) {
-      console.error("Fetch Error:", err);
-      setError("Failed to Fetch data from backend");
+      setTotalRecords(result.total_records || 0);
+    } catch (error) {
+      console.error("Error fetching data:", error);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, search]);
-
-  useEffect(() => {
-    fetchMasterData();
-  }, [fetchMasterData]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search]);
+  };
 
   return (
-    <div className="mt-8 mb-8 px-4">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <Typography variant="h4" className="text-gray-800 font-bold">
-            Master Registry Data
-          </Typography>
-          <Typography variant="small" className="font-medium text-gray-500">
-            {error ? (
-              <span className="text-red-500 font-bold">{error}</span>
-            ) : (
-              `Total Records found: ${totalRecords.toLocaleString()}`
-            )}
-          </Typography>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="w-72">
-            <Input
-              label="Global Search..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <Button 
-            variant="outlined" 
-            size="sm" 
-            className="flex items-center gap-2"
-            onClick={fetchMasterData}
-          >
-            <ArrowPathIcon className="h-4 w-4" /> Refresh
-          </Button>
-        </div>
+    <div className="container mx-auto my-8 px-4">
+      {/* HEADER & SEARCH */}
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">Master Data</h2>
+        <input
+          type="text"
+          className="border rounded-lg px-3 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Search..."
+          value={search}
+          onChange={(e) => {
+            setCurrentPage(1);
+            setSearch(e.target.value);
+          }}
+        />
       </div>
 
-      <Card className="border border-gray-200 rounded-xl shadow-sm bg-white overflow-hidden">
-        <CardHeader
-          floated={false}
-          shadow={false}
-          className="bg-gray-100 border-b border-gray-300 px-6 py-4 rounded-none"
-        >
-          <Typography variant="h6" className="text-gray-800 font-semibold">
-            Central Data Repository
-          </Typography>
-        </CardHeader>
-
-        <CardBody className="overflow-x-auto p-0">
-          {loading ? (
-            <div className="flex flex-col justify-center py-20 items-center gap-3">
-              <Spinner className="h-10 w-10 text-blue-500" />
-              <Typography className="animate-pulse text-gray-600 font-medium">
-                Retrieving Records...
-              </Typography>
-            </div>
-          ) : (
+      {/* TABLE AREA */}
+      <div className="bg-white shadow rounded-lg p-4">
+        {loading ? (
+          <p className="text-center text-blue-500 font-semibold">Loading data...</p>
+        ) : (
+          <>
+            {/* 2. USE THE COMPONENT (Replaces 50 lines of HTML) */}
             <ReusableTable columns={columns} data={data} />
-          )}
-        </CardBody>
-      </Card>
 
-      <div className="flex items-center justify-between mt-6 px-2">
-        <Typography variant="small" className="font-bold text-gray-700">
-          Page {currentPage} of {totalPages}
-        </Typography>
-        <div className="flex gap-2">
-          <Button
-            variant="outlined"
-            size="sm"
-            disabled={currentPage === 1 || loading}
-            onClick={() => setCurrentPage((p) => p - 1)}
-          >
-            Previous
-          </Button>
-          <Button
-            variant="outlined"
-            size="sm"
-            disabled={currentPage === totalPages || loading}
-            onClick={() => setCurrentPage((p) => p + 1)}
-          >
-            Next
-          </Button>
-        </div>
+            {/* PAGINATION CONTROLS */}
+            <div className="flex justify-center items-center mt-6 gap-2 flex-wrap">
+              <button
+                className="px-3 py-1 rounded bg-blue-500 text-white disabled:bg-gray-300"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => p - 1)}
+              >
+                Previous
+              </button>
+              
+              <span className="text-sm text-gray-600">
+                 Page {currentPage} of {totalPages}
+              </span>
+
+              <button
+                className="px-3 py-1 rounded bg-blue-500 text-white disabled:bg-gray-300"
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage((p) => p + 1)}
+              >
+                Next
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

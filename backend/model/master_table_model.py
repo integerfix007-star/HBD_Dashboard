@@ -9,25 +9,26 @@ class MasterTable(db.Model):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     global_business_id = Column(String(100), index=True, unique=True, nullable=False)
-    business_name= Column(String(255), nullable=True)
+    business_id = Column(String(100), index=True, nullable=False)
+    business_name= Column(String(255), nullable=False)
     business_category= Column(String(100), index=True, nullable=True)
     business_subcategory= Column(String(100), nullable=True)
     ratings= Column(Float, nullable= True)
-    primary_phone = Column(String(50), nullable=True) #
+    primary_phone = Column(String(20), nullable=False) #
     secondary_phone= Column(String(20), nullable=True)
-    other_phones= Column(String(255), nullable=True)
+    other_phones= Column(String(20), nullable=True)
     virtual_phone= Column(String(20), nullable=True)
     whatsapp_phone= Column(String(20), nullable=True)
-    email= Column(String(255), index=True, nullable=True)  #
+    email= Column(String(255), index=True, nullable=False)  #
     website_url= Column(String(255), nullable=True) #
     facebook_url=Column(String(255), nullable=True)
     linkedin_url=Column(String(255), nullable=True)
     twitter_url=Column(String(255), nullable=True)
-    address=Column(Text, nullable=True)
-    area=Column(String(255),index=True, nullable=True)
-    city=Column(String(100),index=True, nullable=True)
+    address=Column(String(255), nullable=False)
+    area=Column(String(100),index=True, nullable=True)
+    city=Column(String(50),index=True, nullable=False)
     state=Column(String(50), nullable=False)
-    pincode= Column(String(10), nullable=True)
+    pincode= Column(String(10), nullable=False)
     country= Column(String(50), nullable=False, default='India') 
     latitude= Column(Float, nullable=True)
     longitude= Column(Float, nullable=True)
@@ -59,6 +60,7 @@ class MasterTable(db.Model):
         return {
             "id": self.id,
             "global_business_id": self.global_business_id,
+            "business_id": self.business_id,
             "business_name": self.business_name,
             "business_category": self.business_category,
             "business_subcategory": self.business_subcategory,

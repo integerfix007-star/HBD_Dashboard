@@ -1,42 +1,30 @@
-from flask import Blueprint, request, jsonify
-from extensions import db
-from model.bank import Bank
+from flask import Flask,request,jsonify,Blueprint
+from tasks.listings_task.upload_bank_task import process_bank_task
+from werkzeug.utils import secure_filename
+import os 
+from utils.storage import get_upload_base_dir
 
 bank_bp = Blueprint('bank_bp', __name__)
-
-@bank_bp.route('/fetch-data', methods=['GET'])
-def fetch_bank_data():
+@bank_bp.route('/upload/bank-data', methods=['POST'])
+def upload_bank_route():
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error":"No files provided"}),400
+    UPLOAD_DIR = get_upload_base_dir()/"bank"
+    UPLOAD_DIR.mkdir(parents=True,exist_ok=True)
+    paths = []
+    for f in files:
+        filename = secure_filename(f.filename)
+        filepath = UPLOAD_DIR/filename
+        f.save(filepath)
+        paths.append(str(filepath))
     try:
-        # 1. Get Filters
-        page = request.args.get('page', 1, type=int)
-        limit = request.args.get('limit', 10, type=int)
-        search = request.args.get('search', '')
-        city_filter = request.args.get('city', '')
-
-        # 2. Build Query
-        query = Bank.query
-
-        if search:
-            # Search by Bank Name OR Branch OR IFSC
-            query = query.filter(
-                (Bank.name.ilike(f"%{search}%")) | 
-                (Bank.branch.ilike(f"%{search}%")) |
-                (Bank.ifsc.ilike(f"%{search}%"))
-            )
-        
-        if city_filter:
-            query = query.filter(Bank.city.ilike(f"%{city_filter}%"))
-
-        # 3. Paginate
-        pagination = query.paginate(page=page, per_page=limit, error_out=False)
-        
+        task = process_bank_task.delay(paths)
         return jsonify({
-            "data": [item.to_dict() for item in pagination.items],
-            "total_pages": pagination.pages,
-            "total_count": pagination.total,
-            "current_page": page
-        }), 200
-
+            "status":"file_accepted",
+            "task_id":task.id
+        }),202
     except Exception as e:
-        print(f"Error fetching bank data: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "error":str(e)
+        }),500

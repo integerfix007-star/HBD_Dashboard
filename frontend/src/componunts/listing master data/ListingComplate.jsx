@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Card,
@@ -7,228 +7,255 @@ import {
   Typography,
   Input,
   Spinner,
-  Chip,
 } from "@material-tailwind/react";
-import {
-  ChevronUpDownIcon,
-  ArrowPathIcon,
-  ArrowDownTrayIcon,
-} from "@heroicons/react/24/solid";
-import * as XLSX from "xlsx/dist/xlsx.full.min.js";
-import api from "@/utils/Api"; // Ensure this points to your configured Axios instance
 
-// 1. Updated Columns to match your 'ListingMaster' model
-// Updated columns for Summary View
-const completeColumns = [
-  { key: "business_name", label: "Store / Business Name", width: 300 },
-  { key: "category", label: "Service / Category", width: 200 },
-  { key: "total_listings", label: "Total Listings", width: 150 },
-  { key: "sources", label: "Found On Sources", width: 250 },
+import {
+  MagnifyingGlassIcon,
+  ChevronUpDownIcon,
+  ChevronDownIcon,
+} from "@heroicons/react/24/solid";
+
+import { listingData } from "@/data/listingJSON";
+import * as XLSX from "xlsx/dist/xlsx.full.min.js";
+// import api from "@/api/api.jsx"; // your axios instance; used only when SERVER_PAGINATION = true
+// import * as XLSX from "xlsx/dist/xlsx.full.min.js";
+
+const defaultColumns = [
+  { key: "name", label: "Name", width: 220 },
+  { key: "address", label: "Address", width: 320 },
+  { key: "website", label: "Website", width: 180 },
+  { key: "phone_number", label: "Contact", width: 140 },
+  { key: "reviews_count", label: "Review Count", width: 120 },
+  { key: "reviews_average", label: "Review Avg", width: 120 },
+  { key: "category", label: "Category", width: 140 },
+  { key: "subcategory", label: "Sub-Category", width: 140 },
+  { key: "city", label: "City", width: 140 },
+  { key: "state", label: "State", width: 140 },
+  { key: "area", label: "Area", width: 140 },
 ];
+
+// Convert JSON to CSV
+const convertToCSV = (arr) => {
+  if (!arr?.length) return "";
+  const headers = Object.keys(arr[0]);
+  const rows = arr.map((r) =>
+    headers.map((h) => `"${String(r[h] ?? "").replace(/"/g, "'")}"`).join(",")
+  );
+  return [headers.join(","), ...rows].join("\n");
+};
+
 const ListingComplete = () => {
   const [loading, setLoading] = useState(true);
+  const [fullData, setFullData] = useState([]);
   const [pageData, setPageData] = useState([]);
-  const [filteredData, setFilteredData] = useState([]); // For client-side filtering
-  const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const limit = 10;
 
-  // Search States
   const [search, setSearch] = useState("");
-  const [categorySearch, setCategorySearch] = useState("");
+  const [areaSearch, setAreaSearch] = useState("");
 
-  // 2. Fetch Function pointing to your new Python Route
-  const fetchCompleteData = useCallback(async () => {
+  const [sortField, setSortField] = useState(null);
+  const [sortOrder, setSortOrder] = useState("asc");
+
+  const [columns] = useState(defaultColumns);
+
+  // Load Data
+  useEffect(() => {
     setLoading(true);
-    setError(null);
-    try {
-      // Calling the Flask Route: /api/listing-master
-      const response = await api.get("/api/listing-master");
-
-      // The API returns an array of objects directly
-      const data = response.data || [];
-      setPageData(data);
-      setFilteredData(data); 
-
-    } catch (err) {
-      console.error("Fetch Error:", err);
-      setError("Failed to fetch data from Master Table.");
-    } finally {
+    setTimeout(() => {
+      setFullData(listingData);
+      setTotal(listingData.length);
       setLoading(false);
-    }
+    }, 300);
   }, []);
 
-  // Initial Fetch
-  useEffect(() => {
-    fetchCompleteData();
-  }, [fetchCompleteData]);
+  // Filter Data (Safe with Strings)
+  const filteredData = useMemo(() => {
+    let data = [...fullData];
 
-  // 3. Client-Side Filtering Logic (Since API sends all 100 records for now)
-  useEffect(() => {
-    let result = pageData;
+    const safeValue = (value) => String(value ?? "").toLowerCase();
 
     if (search) {
-      result = result.filter(item => 
-        item.business_name?.toLowerCase().includes(search.toLowerCase())
-      );
+      const s = search.toLowerCase();
+      data = data.filter((x) => safeValue(x.name).includes(s));
     }
 
-    if (categorySearch) {
-      result = result.filter(item => 
-        item.category?.toLowerCase().includes(categorySearch.toLowerCase())
-      );
+    if (areaSearch) {
+      const s = areaSearch.toLowerCase();
+      data = data.filter((x) => safeValue(x.category).includes(s));
     }
 
-    setFilteredData(result);
-  }, [search, categorySearch, pageData]);
+    return data;
+  }, [fullData, search, areaSearch]);
 
-  const exportToExcel = () => {
-    if (!filteredData.length) return;
-    const ws = XLSX.utils.json_to_sheet(filteredData);
+  // Sort Data
+  const sortedData = useMemo(() => {
+    if (!sortField) return filteredData;
+
+    return [...filteredData].sort((a, b) => {
+      const A = String(a[sortField] ?? "").toLowerCase();
+      const B = String(b[sortField] ?? "").toLowerCase();
+      if (A === B) return 0;
+      return sortOrder === "asc" ? (A > B ? 1 : -1) : (A < B ? 1 : -1);
+    });
+  }, [filteredData, sortField, sortOrder]);
+
+  // Pagination
+  useEffect(() => {
+    const start = (currentPage - 1) * limit;
+    setPageData(sortedData.slice(start, start + limit));
+    setTotal(sortedData.length);
+  }, [sortedData, currentPage]);
+
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  // Sorting Handler
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortOrder("asc");
+    }
+  };
+
+  // CSV Download
+  const downloadCSV = (currentOnly = false) => {
+    const arr = currentOnly ? pageData : fullData;
+    const csv = convertToCSV(arr);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = currentOnly ? "listing_page.csv" : "listing_all.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Excel Download
+  const downloadExcel = (currentOnly = false) => {
+    const arr = currentOnly ? pageData : fullData;
+    if (!arr.length) return;
+
+    const ws = XLSX.utils.json_to_sheet(arr);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Complete_Listings");
-    XLSX.writeFile(wb, `Listing_Master_Data.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Listings");
+    XLSX.writeFile(wb, currentOnly ? "listing_page.xlsx" : "listing_all.xlsx");
   };
 
   return (
     <div className="min-h-screen mt-8 mb-12 px-4 rounded bg-white text-black">
-      <div className="flex justify-between items-end mb-6">
-        <div>
-          <Typography variant="h4" className="font-bold text-blue-gray-900">
-            Listing Master Data
-          </Typography>
-          <Typography variant="small" className="font-medium text-gray-500">
-            {error ? (
-              <span className="text-red-500 font-bold">{error}</span>
-            ) : (
-              `Displaying verified complete records (${filteredData.length} total)`
-            )}
-          </Typography>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="gradient"
-            color="green"
-            size="sm"
-            className="flex items-center gap-2"
-            onClick={exportToExcel}
-          >
-            <ArrowDownTrayIcon className="h-4 w-4" /> Export
+      {/* Header */}
+      <div className="flex justify-between items-center mb-4">
+        <Typography variant="h4" className="pb-2">
+          Listing Complete Data
+        </Typography>
+
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => downloadCSV(false)} className="bg-gray-800 text-gray-100">
+            CSV All
           </Button>
-          <Button
-            variant="outlined"
-            size="sm"
-            className="flex items-center gap-2"
-            onClick={fetchCompleteData}
-          >
-            <ArrowPathIcon className="h-4 w-4" /> Refresh
+          <Button size="sm" onClick={() => downloadCSV(true)} className="bg-gray-800 text-gray-100">
+            CSV Page
+          </Button>
+          <Button size="sm" onClick={() => downloadExcel(false)} className="bg-gray-800 text-gray-100">
+            Excel All
+          </Button>
+          <Button size="sm" onClick={() => downloadExcel(true)} className="bg-gray-800 text-gray-100">
+            Excel Page
           </Button>
         </div>
       </div>
 
-      <Card className="h-full w-full border border-blue-gray-100">
-        <CardHeader floated={false} shadow={false} className="rounded-none p-4 bg-blue-gray-50/50">
-          <div className="flex flex-wrap items-center justify-between gap-y-4">
-            <div className="flex w-full shrink-0 gap-2 md:w-max">
-              <div className="w-72">
-                <Input
-                  label="Search Business Name"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              <div className="w-48">
-                <Input
-                  label="Filter by Category"
-                  value={categorySearch}
-                  onChange={(e) => setCategorySearch(e.target.value)}
-                />
-              </div>
-            </div>
+      {/* Table Card */}
+      <Card className="bg-white text-black border">
+        <CardHeader className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-100">
+          <div className="flex gap-3 items-center flex-wrap">
+            <Input label="Search Name..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <Input
+              label="Search Category..."
+              value={areaSearch}
+              onChange={(e) => setAreaSearch(e.target.value)}
+              icon={<MagnifyingGlassIcon className="h-5 w-5" />}
+            />
+          </div>
+
+          <div className="flex gap-2 items-center">
+            <div>Page {currentPage} / {totalPages}</div>
+            <Button size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>Prev</Button>
+            <Button size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>Next</Button>
           </div>
         </CardHeader>
 
-        <CardBody className="overflow-x-auto p-0">
+        {/* Table Body */}
+        <CardBody className="p-0 overflow-x-auto">
           {loading ? (
-            <div className="flex flex-col justify-center py-24 items-center gap-4">
-              <Spinner className="h-10 w-10 text-blue-500" />
-              <Typography className="animate-pulse font-medium text-gray-600">
-                Loading Master Data...
-              </Typography>
+            <div className="flex justify-center py-10">
+              <Spinner className="h-10 w-10" />
             </div>
           ) : (
-            <table className="w-full min-w-[1200px] table-fixed text-left">
-              <thead>
+            <table className="w-full table-fixed border-collapse min-w-[1500px]">
+              <thead className="sticky top-0 z-20 border-b bg-gray-200">
                 <tr>
-                  {completeColumns.map((col) => (
-                    <th
-                      key={col.key}
-                      style={{ width: col.width }}
-                      className="border-y border-blue-gray-100 bg-blue-gray-50/50 p-4"
-                    >
-                      <Typography
-                        variant="small"
-                        color="blue-gray"
-                        className="flex items-center justify-between gap-2 font-bold leading-none opacity-70"
-                      >
-                        {col.label} <ChevronUpDownIcon strokeWidth={2} className="h-4 w-4" />
-                      </Typography>
+                  {columns.map((col) => (
+                    <th key={col.key} style={{ width: col.width }} className="px-3 py-2 text-left">
+                      <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleSort(col.key)}>
+                        <span className="capitalize text-sm font-semibold">{col.label}</span>
+
+                        {sortField === col.key ? (
+                          sortOrder === "asc" ? <ChevronUpDownIcon className="h-4" /> : <ChevronDownIcon className="h-4" />
+                        ) : (
+                          <ChevronUpDownIcon className="h-4 opacity-40" />
+                        )}
+                      </div>
                     </th>
                   ))}
                 </tr>
               </thead>
+
               <tbody>
-              {filteredData.length > 0 ? (
-  filteredData.map((row, index) => (
-    <tr key={index} className="even:bg-blue-gray-50/50 hover:bg-blue-50 transition-colors">
-      {completeColumns.map((col) => (
-        <td key={col.key} className="p-4 border-b border-blue-gray-50">
-          {col.key === "sources" ? (
-            <div className="flex flex-wrap gap-1">
-              {/* Split the comma-separated sources and show badges */}
-              {row[col.key]?.split(",").map((src, i) => (
-                <Chip
-                  key={i}
-                  variant="ghost"
-                  size="sm"
-                  value={src}
-                  color={
-                    src === "JustDial" ? "orange" :
-                    src === "GoogleMap" ? "green" :
-                    src === "AskLaila" ? "red" : "blue"
-                  }
-                  className="rounded-full px-2 py-1 text-[10px]"
-                />
-              ))}
-            </div>
-          ) : col.key === "total_listings" ? (
-             <div className="flex items-center gap-2">
-                <span className="font-bold text-blue-gray-800 text-lg">
-                    {row[col.key]}
-                </span>
-                <span className="text-xs text-gray-500">records</span>
-             </div>
-          ) : (
-            <Typography variant="small" color="blue-gray" className="font-semibold">
-              {row[col.key] || "-"}
-            </Typography>
-          )}
-        </td>
-      ))}
-    </tr>
-  ))
-) : (
+                {pageData.length === 0 ? (
                   <tr>
-                    <td colSpan={completeColumns.length} className="p-20 text-center">
-                      <Typography variant="h6" color="blue-gray" className="opacity-40 italic">
-                        {error || "No records found in Master Table"}
-                      </Typography>
-                    </td>
+                    <td colSpan={columns.length} className="text-center p-6">No records found</td>
                   </tr>
+                ) : (
+                  pageData.map((row, idx) => (
+                    <tr key={idx} className="border-b hover:bg-gray-50">
+                      {columns.map((col) => (
+                        <td key={col.key} style={{ width: col.width }} className="px-3 py-3 break-words text-sm">
+                          {String(row[col.key] ?? "-")}
+                        </td>
+                      ))}
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           )}
         </CardBody>
       </Card>
+
+      {/* Footer Pagination */}
+      <div className="mt-4 flex justify-center items-center gap-2">
+        <Button size="sm" onClick={() => setCurrentPage(1)} disabled={currentPage === 1}>
+          First
+        </Button>
+        <Button size="sm" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
+          Prev
+        </Button>
+
+        <div className="px-3 py-1 border rounded">
+          Page {currentPage} / {totalPages}
+        </div>
+
+        <Button size="sm" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+          Next
+        </Button>
+        <Button size="sm" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}>
+          Last
+        </Button>
+      </div>
     </div>
   );
 };
