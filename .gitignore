@@ -7,3 +7,4 @@ __pycache__/
 venv/
 backend/model/*.json
 backend/*.log
+*.log
