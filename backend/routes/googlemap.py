@@ -1,41 +1,35 @@
-from flask import Blueprint, request, jsonify
-from model.googlemap_data import GoogleMapData 
+from flask import Blueprint, jsonify
+from model.googlemap_data import GooglemapData
+from database.session import get_db_session
 
-googlemap_bp = Blueprint('googlemap', __name__)
+googlemap_bp = Blueprint("googlemap", __name__)
 
-@googlemap_bp.route("/google-listings", methods=["GET"])
-def get_google_listings():
+# -----------------
+# API Endpoints
+# -----------------
+@googlemap_bp.route("/googlemap_data", methods=["GET"])
+def get_places():
+    """Fetch all places"""
+    session = get_db_session()
     try:
-        page = request.args.get('page', 1, type=int)
-        limit = request.args.get('limit', 10, type=int)
-        search = request.args.get('search', '').strip()
-        city = request.args.get('city', '').strip()
-
-        query = GoogleMapData.query
-
-        if search:
-            query = query.filter(GoogleMapData.business_name.ilike(f"%{search}%"))
-        
-        if city:
-            # Added a null check (.isnot(None)) to prevent database crashes
-            query = query.filter(
-                GoogleMapData.address.isnot(None),
-                GoogleMapData.address.ilike(f"%{city}%")
-            )
-
-        paginated_data = query.order_by(GoogleMapData.id.desc()).paginate(
-            page=page, 
-            per_page=limit, 
-            error_out=False
-        )
-
-        return jsonify({
-            "data": [item.to_dict() for item in paginated_data.items],
-            "total_count": paginated_data.total,
-            "total_pages": paginated_data.pages,
-            "current_page": page
-        })
-
-    except Exception as e:
-        print(f"❌ Backend Error: {str(e)}") 
-        return jsonify({"error": "Internal Server Error"}), 500
+        places = session.query(GooglemapData).all()
+        results = []
+        for p in places:
+            results.append({
+                "id": p.id,
+                "name": p.name,
+                "address": p.address,
+                "website": p.website,
+                "phone_number": p.phone_number,
+                "reviews_count": p.reviews_count,
+                "reviews_average": p.reviews_average,
+                "category": p.category,
+                "subcategory": p.subcategory,
+                "city": p.city,
+                "state": p.state,
+                "area": p.area,
+                "created_at": p.created_at.isoformat() if p.created_at else None
+            })
+        return jsonify(results)
+    finally:
+        session.close()

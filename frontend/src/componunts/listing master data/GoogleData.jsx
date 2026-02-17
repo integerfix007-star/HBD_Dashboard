@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-import React, { useEffect, useState, useCallback } from "react";
-import api from "@/utils/Api"; // Using your standard API wrapper
-=======
 import React, { useEffect, useMemo, useState } from "react";
->>>>>>> 2a840bcb2df3f5d97552e0cf9d22c71bb6392309
 import {
   Button,
   Card,
@@ -66,38 +61,9 @@ const GoogleData = () => {
   // Load Data
   useEffect(() => {
     setLoading(true);
-<<<<<<< HEAD
-    setError(null);
-    try {
-      const queryParams = new URLSearchParams({
-        page: currentPage,
-        limit: limit,
-        search: search,
-        city: citySearch,
-      });
-
-      // Using the api utility instead of hardcoded fetch
-      // Note: We used url_prefix='/api' in app.py, so we include it here
-      const response = await api.get(`/google-listings?${queryParams}`);
-      const result = response.data;
-
-      setPageData(result.data || []);
-      setTotalPages(result.total_pages || 1);
-      setTotalRecords(result.total_count || 0);
-    } catch (err) {
-      console.error("Fetch Error:", err);
-      // Standardized error handling from your AtmData example
-      if (err.code === "ERR_NETWORK") {
-        setError("Backend offline. Check Docker logs or Network.");
-      } else {
-        setError("Failed to fetch Google data.");
-      }
-    } finally {
-=======
     setTimeout(() => {
       setFullData(listingData);
       setTotal(listingData.length);
->>>>>>> 2a840bcb2df3f5d97552e0cf9d22c71bb6392309
       setLoading(false);
     }, 300);
   }, []);
@@ -140,11 +106,6 @@ const GoogleData = () => {
     setTotal(sortedData.length);
   }, [sortedData, currentPage]);
 
-<<<<<<< HEAD
-  const exportToExcel = () => {
-    if (!pageData.length) return;
-    const ws = XLSX.utils.json_to_sheet(pageData);
-=======
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   // Sorting Handler
@@ -176,7 +137,6 @@ const GoogleData = () => {
     if (!arr.length) return;
 
     const ws = XLSX.utils.json_to_sheet(arr);
->>>>>>> 2a840bcb2df3f5d97552e0cf9d22c71bb6392309
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Listings");
     XLSX.writeFile(wb, currentOnly ? "listing_page.xlsx" : "listing_all.xlsx");
@@ -206,57 +166,6 @@ const GoogleData = () => {
         </div>
       </div>
 
-<<<<<<< HEAD
-      <Card className="h-full w-full border border-blue-gray-100">
-        <CardHeader floated={false} shadow={false} className="rounded-none p-4 bg-blue-gray-50/50">
-          <div className="flex flex-wrap items-center justify-between gap-y-4">
-            <div className="flex w-full shrink-0 gap-2 md:w-max">
-              <div className="w-72">
-                <Input 
-                  label="Search Business Name" 
-                  value={search} 
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setCurrentPage(1); // Reset page on search
-                  }} 
-                />
-              </div>
-              <div className="w-48">
-                <Input 
-                  label="Filter by City" 
-                  value={citySearch} 
-                  onChange={(e) => {
-                    setCitySearch(e.target.value);
-                    setCurrentPage(1); // Reset page on filter
-                  }} 
-                />
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-4">
-              <Typography variant="small" className="font-bold text-blue-gray-700">
-                Page {currentPage} of {totalPages}
-              </Typography>
-              <div className="flex gap-2">
-                <Button 
-                  variant="outlined" 
-                  size="sm" 
-                  disabled={currentPage === 1 || loading} 
-                  onClick={() => setCurrentPage(p => p - 1)}
-                >
-                  Previous
-                </Button>
-                <Button 
-                  variant="outlined" 
-                  size="sm" 
-                  disabled={currentPage === totalPages || loading} 
-                  onClick={() => setCurrentPage(p => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-=======
       {/* Table Card */}
       <Card className="bg-white text-black border">
         <CardHeader className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-100">
@@ -274,7 +183,6 @@ const GoogleData = () => {
             <div>Page {currentPage} / {totalPages}</div>
             <Button size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>Prev</Button>
             <Button size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>Next</Button>
->>>>>>> 2a840bcb2df3f5d97552e0cf9d22c71bb6392309
           </div>
         </CardHeader>
 
