@@ -15,6 +15,8 @@ validation_dashboard_bp = Blueprint("validation_dashboard", __name__)
 VALIDATION_TABLE = "validation_raw_google_map"
 CLEAN_TABLE = "raw_clean_google_map_data"
 RAW_TABLE = "raw_google_map_drive_data"
+MASTER_TABLE = "g_map_master_table"
+INVALID_TABLE = "invalid_google_map_data"
 
 
 def execute_read(query, params=None):
@@ -63,22 +65,22 @@ def get_validation_dashboard():
         validation_pct = round(((validation_count - pending) / validation_count * 100), 2) if validation_count > 0 else 0
         cleaning_pct = round((cleaned / validation_count * 100), 2) if validation_count > 0 else 0
 
-        # ❌ 5. Error rows (most recent 100)
+        # ❌ 5. Error rows (most recent 100 from NEW Audit Table)
         error_rows = execute_read(f"""
-            SELECT id, raw_id, name, city, state, category, phone_number,
-                   validation_status, missing_fields, invalid_format_fields, duplicate_reason, processed_at
-            FROM {VALIDATION_TABLE}
-            WHERE validation_status IN ('INVALID', 'MISSING', 'DUPLICATE')
-            ORDER BY processed_at DESC
+            SELECT id, raw_id, name, city, state, category, phone_number, bank_number, 
+                   validation_label, error_reason, missing_fields, invalid_format_fields, created_at
+            FROM {INVALID_TABLE}
+            ORDER BY created_at DESC
             LIMIT 100
         """)
         errors = []
         for r in error_rows:
             errors.append({
                 "id": r[0], "raw_id": r[1], "name": r[2], "city": r[3], "state": r[4],
-                "category": r[5], "phone_number": r[6], "validation_status": r[7],
-                "missing_fields": r[8], "invalid_format_fields": r[9],
-                "duplicate_reason": r[10], "processed_at": str(r[11]) if r[11] else None
+                "category": r[5], "phone_number": r[6], "bank_number": r[7],
+                "validation_status": r[8], "error_reason": r[9],
+                "missing_fields": r[10], "invalid_format_fields": r[11],
+                "processed_at": str(r[12]) if r[12] else None
             })
 
         # ✅ 6. Clean data sample (most recent 50)
@@ -132,49 +134,31 @@ def get_validation_dashboard():
 
 @validation_dashboard_bp.route("/api/validation/errors", methods=["GET"])
 def get_validation_errors():
-    """❌ Paginated error rows — INVALID, MISSING, DUPLICATE."""
+    """❌ Paginated error rows from the NEW invalid_google_map_data table."""
     page = int(request.args.get("page", 1))
     limit = int(request.args.get("limit", 50))
-    status_filter = request.args.get("status")  # 🏷️ INVALID, MISSING, DUPLICATE
-    field_filter = request.args.get("field")      # 🔍 name, address, etc.
     offset = (page - 1) * limit
-
-    params = {"limit": limit, "offset": offset}
-    where_clauses = ["validation_status IN ('INVALID', 'MISSING', 'DUPLICATE')"]
-
-    if status_filter:
-        where_clauses[0] = "validation_status = :status"
-        params["status"] = status_filter
-    
-    if field_filter:
-        # 🔍 Use FIND_IN_SET to match field in comma-separated missing_fields column
-        where_clauses.append("FIND_IN_SET(:field, missing_fields)")
-        params["field"] = field_filter
-
-    where = f"WHERE {' AND '.join(where_clauses)}"
 
     try:
         rows = execute_read(f"""
-            SELECT id, raw_id, name, city, state, category, phone_number,
-                   validation_status, missing_fields, invalid_format_fields, duplicate_reason, processed_at
-            FROM {VALIDATION_TABLE}
-            {where}
-            ORDER BY processed_at DESC
+            SELECT id, raw_id, name, city, state, category, phone_number, bank_number, 
+                   validation_label, error_reason, missing_fields, invalid_format_fields, created_at
+            FROM {INVALID_TABLE}
+            ORDER BY created_at DESC
             LIMIT :limit OFFSET :offset
-        """, params)
+        """, {"limit": limit, "offset": offset})
 
         data = []
         for r in rows:
             data.append({
                 "id": r[0], "raw_id": r[1], "name": r[2], "city": r[3], "state": r[4],
-                "category": r[5], "phone_number": r[6], "validation_status": r[7],
-                "missing_fields": r[8], "invalid_format_fields": r[9],
-                "duplicate_reason": r[10], "processed_at": str(r[11]) if r[11] else None
+                "category": r[5], "phone_number": r[6], "bank_number": r[7],
+                "status": r[8], "reason": r[9],
+                "missing_fields": r[10], "invalid_format_fields": r[11],
+                "created_at": str(r[12]) if r[12] else None
             })
 
-        # 📊 Total count for pagination
-        total = execute_read(f"SELECT COUNT(*) FROM {VALIDATION_TABLE} {where}", params)[0][0]
-
+        total = execute_read(f"SELECT COUNT(*) FROM {INVALID_TABLE}")[0][0]
         return jsonify({"status": "success", "data": data, "page": page, "total": total})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -246,7 +230,7 @@ def get_validation_report():
         rows = execute_read(f"""
             SELECT 
                 COUNT(*) as total,
-                SUM(CASE WHEN validation_status = 'STRUCTURED' THEN 1 ELSE 0 END) as valid,
+                SUM(CASE WHEN validation_status = 'VALID' THEN 1 ELSE 0 END) as valid,
                 SUM(CASE WHEN validation_status IN ('INVALID', 'MISSING') THEN 1 ELSE 0 END) as invalid,
                 MAX(processed_at) as last_updated
             FROM {VALIDATION_TABLE}
@@ -305,7 +289,7 @@ def get_validation_report():
             SELECT 
                 state,
                 COUNT(*) as total,
-                SUM(CASE WHEN validation_status = 'STRUCTURED' THEN 1 ELSE 0 END) as valid
+                SUM(CASE WHEN validation_status = 'VALID' THEN 1 ELSE 0 END) as valid
             FROM {VALIDATION_TABLE}
             {where_str}
             GROUP BY state

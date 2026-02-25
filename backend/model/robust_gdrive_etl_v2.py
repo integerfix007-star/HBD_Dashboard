@@ -1,4 +1,5 @@
 import os
+import re
 import io
 import csv
 import time
@@ -98,9 +99,9 @@ class GDriveHighSpeedIngestor:
         """Load already processed file IDs + hashes, folder timestamps."""
         logger.info("Loading Registry Checkpoints...")
         with self.engine.connect() as conn:
-            # Fix 8: Load file hashes for change detection
-            files = conn.execute(text("SELECT drive_file_id, file_hash FROM file_registry"))
-            self.processed_files = {row[0]: row[1] for row in files}
+            # Load file hashes and status for high-speed change detection
+            files = conn.execute(text("SELECT drive_file_id, file_hash, status FROM file_registry"))
+            self.processed_files = {row[0]: {"hash": row[1], "status": row[2]} for row in files}
             
             # Load Folder Registry (ID -> ModifiedTime)
             folders = conn.execute(text("SELECT folder_id, drive_modified_at FROM drive_folder_registry"))
@@ -189,73 +190,54 @@ class GDriveHighSpeedIngestor:
     def scanner_producer(self, folder_id, folder_name, path=""):
         if self.shutdown_event.is_set(): return
         
-        # Check if folder is already fully processed in db
-        recorded_mod = self.folder_registry.get(folder_id)
-        # If it exists, SKIP the folder entirely to prevent re-scanning 125,000 files
-        if recorded_mod:
-            logger.debug(f"⏭ SKIPPING Folder: {folder_name} (Already indexed)")
-            with self.stats_lock:
-                self.total_skipped_folders += 1
-            return
-            
-        # 1. Fetch items
+        # 1. Fetch items (Already sorted by modifiedTime DESC in API call)
         items = self.list_files(folder_id)
         
+        # Separate Folders and Files to guarantee processing order
+        folders = [item for item in items if item['mimeType'] == 'application/vnd.google-apps.folder']
+        csv_files = [item for item in items if item['name'].lower().endswith('.csv')]
+        
+        # Process NEWEST CSV FILES first
         folder_skipped = 0
         folder_dispatched = 0
         
-        for item in items:
-            if item['mimeType'] == 'application/vnd.google-apps.folder':
-                # Recursive Scan with Cache Check
-                # If folder is in registry and modification time matches, we can skip deep scan
-                # BUT: GDrive folders don't always update mod_time when children change. 
-                # So we verify strictly.
-                
-                self.scanner_producer(item['id'], item['name'], f"{path}/{folder_name}")
+        for item in csv_files:
+            if self.shutdown_event.is_set(): break
             
-            elif item['name'].lower().endswith('.csv'):
-                # Fix 8: Hash-based change detection
-                current_hash = self.get_file_hash(item['id'], item.get('modifiedTime', ''))
-                existing_hash = self.processed_files.get(item['id'])
+            # High-Speed Change Detection (Phase 3) using Cached Registry
+            current_hash = self.get_file_hash(item['id'], item.get('modifiedTime', ''))
+            cached = self.processed_files.get(item['id'], {})
+            existing_hash = cached.get('hash')
+            status = cached.get('status')
+            
+            if status == 'PROCESSED' and existing_hash == current_hash:
+                folder_skipped += 1
+                continue
                 
-                if existing_hash and existing_hash == current_hash:
-                    folder_skipped += 1
-                    continue
-                    
-                # New or modified file -> Dispatch
-                from tasks.gdrive_task.etl_tasks import process_csv_task
-                process_csv_task.delay(
-                    file_id=item['id'], 
-                    file_name=item['name'],
-                    folder_id=folder_id, 
-                    folder_name=folder_name,
-                    path=f"{path}/{folder_name}", 
-                    modified_time=item.get('modifiedTime')
-                )
-                folder_dispatched += 1
-                if existing_hash:
-                    logger.debug(f"[RE-DISPATCH] {item['name']} (hash changed)")
-                else:
-                    logger.debug(f"[DISPATCH] {item['name']}")
-                
-        # Log Summary for this folder
-        if folder_dispatched > 0:
-            logger.debug(f"📂 [SCANNED] {folder_name}: {folder_dispatched} new tasks, {folder_skipped} skipped.")
+            # New, Modified, or Partial file -> Dispatch (Phase 2 & 3)
+            from tasks.gdrive_task.etl_tasks import process_csv_task
+            process_csv_task.delay(
+                file_id=item['id'], 
+                file_name=item['name'],
+                folder_id=folder_id, 
+                folder_name=folder_name,
+                path=f"{path}/{folder_name}", 
+                modified_time=item.get('modifiedTime')
+            )
+            folder_dispatched += 1
+
+        # Then recursively scan NEWEST SUBFOLDERS (Phase 2)
+        for folder in folders:
+            if self.shutdown_event.is_set(): break
+            self.scanner_producer(folder['id'], folder['name'], f"{path}/{folder_name}")
             
         with self.stats_lock:
             self.total_scanned_folders += 1
             self.total_dispatched_files += folder_dispatched
             
-            # Periodic Heartbeat (Every 200 folders)
-            total_processed = self.total_scanned_folders + self.total_skipped_folders
-            if total_processed % 200 == 0:
-                logger.info(f"⏳ [PROGRESS] Scanned {self.total_scanned_folders} | Skipped {self.total_skipped_folders} | Dispatched {self.total_dispatched_files} files...")
-            
-        # Update folder state (Legacy logic, keeping it for now)
-        mod_time = datetime.utcnow().isoformat() + "Z"
-        if items:
-            mod_time = items[0].get('modifiedTime', mod_time)
-        self.register_folder(folder_id, folder_name, mod_time, 0)
+        # Register folder scan as done
+        mod_time = items[0].get('modifiedTime') if items else datetime.utcnow().isoformat() + "Z"
+        self.register_folder(folder_id, folder_name, mod_time, len(csv_files))
 
     # REMOVED: download_csv, worker_consumer, process_file, commit_batch
     # These are now handled by Celery in tasks/gdrive_task/etl_tasks.py
@@ -293,7 +275,7 @@ class GDriveHighSpeedIngestor:
             top_folders = [f for f in self.list_files(ROOT_FOLDER_ID) if f['mimeType'] == 'application/vnd.google-apps.folder']
             
             # We still use a ThreadPool for SCANNING (iterating folders), but not for processing
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            with ThreadPoolExecutor(max_workers=32) as executor:
                 futures = [executor.submit(self.scanner_producer, f['id'], f['name'], "ROOT") for f in top_folders]
                 for f in as_completed(futures): pass
                 self.scanners_finished.set()
@@ -359,27 +341,327 @@ class GDriveHighSpeedIngestor:
         self.save_change_token(self.page_token)
         logger.info(f"✨ Reactive Cycle dispatched in {time.time() - start_time:.2f}s")
 
+
+class ValidationCleaningProcessor:
+    """
+    🛡️ Continuous Validation & Cleaning Layer
+    Processes raw_google_map_drive_data -> validation_raw_google_map -> raw_clean_google_map_data
+    Ensures zero data loss, multilingual safety, and logical duplicate detection.
+    """
+    def __init__(self, engine, shutdown_event):
+        self.engine = engine
+        self.shutdown_event = shutdown_event
+        self.batch_size = 10000 # High-speed: process 10k rows per cycle
+
+    def get_last_processed_id(self):
+        try:
+            with self.engine.connect() as conn:
+                res = conn.execute(text("SELECT meta_value FROM etl_metadata WHERE meta_key='last_processed_id'"))
+                row = res.fetchone()
+                return int(row[0]) if row and str(row[0]).isdigit() else 0
+        except Exception:
+            return 0
+
+    def update_last_processed_id(self, last_id):
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO etl_metadata (meta_key, meta_value) 
+                    VALUES ('last_processed_id', :val) 
+                    ON DUPLICATE KEY UPDATE meta_value = :val
+                """), {"val": str(last_id)})
+        except Exception as e:
+            logger.error(f"Failed to update last_processed_id: {e}")
+
+    def log_validation_batch(self, summary):
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO data_validation_log 
+                    (total_processed, missing_count, valid_count, duplicate_count, cleaned_count, timestamp)
+                    VALUES (:total, :missing, :valid, :duplicate, :cleaned, NOW())
+                """), summary)
+        except Exception as e:
+            logger.error(f"Failed to log validation batch: {e}")
+
+    def is_missing(self, val):
+        return val is None or str(val).strip() == ""
+
+    def validate_row(self, row):
+        # Mandatory fields for STRUCTURED check (Multilingual Safe)
+        mandatory_fields = ["name", "address", "phone_number", "city", "state", "category"]
+        missing = [f for f in mandatory_fields if self.is_missing(row.get(f))]
+        
+        is_structured = len(missing) == 0
+        
+        # Format checks for VALID check
+        invalid_fields = []
+        
+        # Phone (Phase 7): Numeric only, 8-18 digits
+        raw_phone = str(row.get('phone_number', '') or '')
+        clean_phone = re.sub(r'\D', '', raw_phone)
+        if not (self.is_missing(clean_phone)) and not re.match(r'^\d{8,18}$', clean_phone):
+            invalid_fields.append("phone_number")
+        elif self.is_missing(clean_phone):
+            if "phone_number" not in missing:
+                missing.append("phone_number")
+            
+        # Website: Must contain "." if present
+        website = str(row.get('website', '') or '').strip()
+        if website and '.' not in website:
+            invalid_fields.append("website")
+            
+        is_valid = len(invalid_fields) == 0 and is_structured
+        
+        return is_structured, is_valid, missing, invalid_fields, clean_phone
+
+    def check_duplicates_batch(self, signatures, conn):
+        """Batch check signatures against the clean table."""
+        if not signatures: return set()
+        
+        # We check exactly against the composite index for speed
+        check_query = text("""
+            SELECT name, phone_number, address FROM raw_clean_google_map_data 
+            WHERE (phone_number, name, address) IN :sigs
+        """)
+        
+        # Format for Tuple IN clause in MySQL
+        # Construct raw string for IN clause as fallback or use parameter binding
+        # Faster approach: Hash-based duplicate check using MD5 in Python
+        # Instead of slow tuple IN clause, we hash signatures and compare sets
+        
+        results = set()
+        sig_list = list(signatures)
+        
+        # Build hash lookup for existing clean data
+        for i in range(0, len(sig_list), 2000):
+            batch = sig_list[i:i+2000]
+            # Build WHERE clause with OR conditions for speed
+            conditions = []
+            params = {}
+            for idx, (phone, name, addr) in enumerate(batch):
+                conditions.append(f"(phone_number = :p{idx} AND LOWER(TRIM(name)) = :n{idx})")
+                params[f"p{idx}"] = phone
+                params[f"n{idx}"] = name
+            
+            if not conditions:
+                continue
+                
+            query = f"SELECT LOWER(TRIM(name)) as n, phone_number as p, LOWER(TRIM(address)) as a FROM raw_clean_google_map_data WHERE {' OR '.join(conditions)}"
+            try:
+                rows = conn.execute(text(query), params).fetchall()
+                for r in rows:
+                    results.add((str(r[1]), str(r[0]), str(r[2])))
+            except Exception as e:
+                logger.warning(f"Duplicate check sub-batch failed: {e}")
+        return results
+
+    def start_pipeline(self):
+        """Main loop for the validation thread."""
+        last_id = self.get_last_processed_id()
+        logger.info(f"🛡️ Validation Processor Started from ID: {last_id}")
+        
+        while not self.shutdown_event.is_set():
+            try:
+                # Use a SINGLE connection for the entire cycle (fetch + check + write)
+                with self.engine.begin() as conn:
+                    # READ UNCOMMITTED: prevents locking raw table during read
+                    conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"))
+                    
+                    # 1. Fetch batch — only needed columns (faster than SELECT *)
+                    rows = conn.execute(text("""
+                        SELECT id, name, address, website, phone_number, 
+                               reviews_count, reviews_average, category, subcategory, 
+                               city, state, area, created_at
+                        FROM raw_google_map_drive_data 
+                        WHERE id > :last_id 
+                        ORDER BY id ASC 
+                        LIMIT :limit
+                    """), {"last_id": last_id, "limit": self.batch_size}).fetchall()
+                
+                    if not rows:
+                        conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+                        if self.shutdown_event.wait(timeout=10):
+                            break
+                        continue
+
+                    batch_summary = {
+                        "total": 0,
+                        "missing": 0,
+                        "valid": 0,
+                        "duplicate": 0,
+                        "cleaned": 0
+                    }
+                    
+                    current_max_id = last_id
+                    
+                    # 2. Process batch in memory
+                    validation_batch = []
+                    invalid_audit_batch = []
+                    clean_data_batch = []
+                    master_data_batch = []
+                    
+                    # Pre-calculate signatures for bulk duplicate check
+                    batch_rows = []
+                    signatures = set()
+                    
+                    for row_obj in rows:
+                        row = row_obj._asdict() if hasattr(row_obj, '_asdict') else row_obj._mapping
+                        batch_rows.append(row)
+                        current_max_id = max(current_max_id, row['id'])
+                        
+                        # Pre-validate and extract phone
+                        raw_phone = str(row.get('phone_number', '') or '')
+                        clean_phone = re.sub(r'\D', '', raw_phone)
+                        norm_name = str(row.get('name', '') or '').strip().lower()
+                        norm_addr = str(row.get('address', '') or '').strip().lower()
+                        
+                        signatures.add((clean_phone, norm_name, norm_addr))
+
+                    # Bulk Duplicate Check (same connection, no overhead)
+                    existing_sigs = self.check_duplicates_batch(signatures, conn)
+                    
+                    # Switch back to safe mode for writes
+                    conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+
+                    for row in batch_rows:
+                        batch_summary["total"] += 1
+                        is_structured, is_valid, missing_list, invalid_list, clean_phone = self.validate_row(row)
+                        
+                        norm_name = str(row.get('name', '') or '').strip().lower()
+                        norm_addr = str(row.get('address', '') or '').strip().lower()
+                        sig = (clean_phone, norm_name, norm_addr)
+                        is_duplicate = sig in existing_sigs if is_structured else False
+
+                        # Determine status
+                        if not is_structured: status = "MISSING"; batch_summary["missing"] += 1
+                        elif is_duplicate: status = "DUPLICATE"; batch_summary["duplicate"] += 1
+                        elif not is_valid: status = "INVALID"
+                        else: status = "VALID"
+
+                        # 3. Queue for Validation Table
+                        validation_batch.append({
+                            "raw_id": row['id'], "name": row['name'], "address": row['address'], "website": row['website'],
+                            "phone_number": row['phone_number'], "reviews_count": row.get('reviews_count', 0),
+                            "reviews_avg": row.get('reviews_average', 0.00), "category": row['category'],
+                            "subcategory": row['subcategory'], "city": row['city'], "state": row['state'],
+                            "area": row['area'], "created_at": row.get('created_at') or datetime.now(),
+                            "status": status, "missing": ",".join(missing_list) if missing_list else None,
+                            "invalid": ",".join(invalid_list) if invalid_list else None
+                        })
+
+                        # 4. Queue for Invalid Audit
+                        if status in ["MISSING", "INVALID"]:
+                            invalid_audit_batch.append({
+                                "raw_id": row['id'], "name": row['name'], "address": row['address'], "website": row['website'],
+                                "phone": clean_phone, "bank": row['phone_number'],
+                                "reviews": row.get('reviews_count', 0), "avg": row.get('reviews_average', 0.00),
+                                "cat": row['category'], "sub": row['subcategory'], "city": row['city'],
+                                "state": row['state'], "area": row['area'], "label": status,
+                                "missing": ",".join(missing_list) if missing_list else None,
+                                "invalid": ",".join(invalid_list) if invalid_list else None,
+                                "reason": f"Missing: {','.join(missing_list)} | Invalid: {','.join(invalid_list)}"
+                            })
+
+                        # 5. Queue for Production
+                        if status == "VALID":
+                            batch_summary["valid"] += 1
+                            clean_data_batch.append({
+                                "raw_id": row['id'], "name": str(row['name']).strip(), "address": str(row['address']).strip(),
+                                "website": str(row['website']).lower().strip() if row['website'] else None,
+                                "phone": clean_phone, "reviews": row.get('reviews_count', 0), "avg": row.get('reviews_average', 0.00),
+                                "cat": row['category'], "sub": row['subcategory'], "city": row['city'],
+                                "state": row['state'], "area": row['area'], "created": row.get('created_at') or datetime.now()
+                            })
+                            master_data_batch.append({
+                                "name": str(row['name']).strip(), "address": str(row['address']).strip(),
+                                "website": str(row['website']).lower().strip() if row['website'] else None,
+                                "phone": clean_phone, "reviews": row.get('reviews_count', 0), "avg": row.get('reviews_average', 0.00),
+                                "cat": row['category'], "sub": row['subcategory'], "city": row['city'],
+                                "state": row['state'], "area": row['area'], "created": row.get('created_at') or datetime.now()
+                            })
+                            batch_summary["cleaned"] += 1
+
+                    # 6. Execute Batch Writes (same transaction — atomic)
+                    if validation_batch:
+                        conn.execute(text("""
+                            INSERT INTO validation_raw_google_map 
+                            (raw_id, name, address, website, phone_number, reviews_count, reviews_avg, 
+                             category, subcategory, city, state, area, created_at, 
+                             validation_status, missing_fields, invalid_format_fields, processed_at)
+                            VALUES 
+                            (:raw_id, :name, :address, :website, :phone_number, :reviews_count, :reviews_avg,
+                             :category, :subcategory, :city, :state, :area, :created_at,
+                             :status, :missing, :invalid, NOW())
+                            ON DUPLICATE KEY UPDATE validation_status = VALUES(validation_status), processed_at = NOW()
+                        """), validation_batch)
+
+                    if invalid_audit_batch:
+                        conn.execute(text("""
+                            INSERT INTO invalid_google_map_data 
+                            (raw_id, name, address, website, phone_number, bank_number, 
+                             reviews_count, reviews_avg, category, subcategory, city, state, area,
+                             validation_label, missing_fields, invalid_format_fields, error_reason, created_at)
+                            VALUES 
+                            (:raw_id, :name, :address, :website, :phone, :bank,
+                             :reviews, :avg, :cat, :sub, :city, :state, :area,
+                             :label, :missing, :invalid, :reason, NOW())
+                        """), invalid_audit_batch)
+
+                    if clean_data_batch:
+                        conn.execute(text("""
+                            INSERT IGNORE INTO raw_clean_google_map_data 
+                            (raw_id, name, address, website, phone_number, reviews_count, reviews_avg,
+                             category, subcategory, city, state, area, created_at)
+                            VALUES (:raw_id, :name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created)
+                        """), clean_data_batch)
+                        
+                    if master_data_batch:
+                        conn.execute(text("""
+                            INSERT IGNORE INTO g_map_master_table 
+                            (name, address, website, phone_number, reviews_count, reviews_avg, category, subcategory, city, state, area, created_at)
+                            VALUES (:name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created)
+                        """), master_data_batch)
+
+                # 7. Finalize batch
+                self.update_last_processed_id(current_max_id)
+                self.log_validation_batch(batch_summary)
+                last_id = current_max_id
+                
+                logger.info(f"🛡️ Batch Complete: Processed {batch_summary['total']} rows. Last ID: {last_id}")
+
+            except Exception as e:
+                logger.error(f"🛡️ Validation Loop Error: {e}")
+                if self.shutdown_event.wait(timeout=10):
+                    break
+
 def get_engine():
     return GDriveHighSpeedIngestor()
 
 def start_background_etl():
     """Started by app.py to orchestrate the scanning."""
     ingestor = get_engine()
-    def loop():
+    
+    # Start Drive Scanner Thread
+    def scanner_loop():
         while not ingestor.shutdown_event.is_set():
             try:
                 ingestor.run_pipeline()
-                logger.info("Sleeping for 60s...")
-                # Fix 7: Interruptible Sleep
-                if ingestor.shutdown_event.wait(timeout=60):
-                    logger.info("🛑 Background ETL Thread stopping...")
+                logger.info("Scanner sleeping for 30s...")
+                if ingestor.shutdown_event.wait(timeout=30):
                     break
             except Exception as e:
-                logger.error(f"ETL Loop error: {e}")
+                logger.error(f"Scanner Loop error: {e}")
                 time.sleep(10)
     
-    t = threading.Thread(target=loop, daemon=True)
-    t.start()
+    t_scanner = threading.Thread(target=scanner_loop, name="ScannerThread", daemon=True)
+    t_scanner.start()
+
+    # Start Validation & Cleaning Thread
+    validator = ValidationCleaningProcessor(ingestor.engine, ingestor.shutdown_event)
+    t_validator = threading.Thread(target=validator.start_pipeline, name="ValidatorThread", daemon=True)
+    t_validator.start()
+
     return ingestor
 
 if __name__ == "__main__":

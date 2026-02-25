@@ -67,6 +67,7 @@ from routes.product_routes.upload_flipkart_products_route import flipkart_bp
 from routes.product_routes.upload_india_mart_route import indiamart_bp
 from routes.product_routes.upload_jio_mart_route import jiomart_bp
 from routes.gdrive_etl_routes.validation_dashboard import validation_dashboard_bp
+from routes.gdrive_etl_routes.dashboard_stats import dashboard_bp
 
 from model.robust_gdrive_etl_v2 import start_background_etl
 import sys
@@ -105,6 +106,15 @@ PUBLIC_ROUTES = [
     "/listing-master",         
     "/complete-data",
     "/api/validation/dashboard",
+    "/api/validation/errors",
+    "/api/validation/clean",
+    "/api/validation/report",
+    "/api/model/stats",
+    "/api/model/recent",
+    "/api/model/all",
+    "/api/model/files",
+    "/api/model/state-summary",
+    "/api/model/folder-status",
 ]
 
 @app.before_request
@@ -142,6 +152,7 @@ app.register_blueprint(item_duplicate_bp)
 app.register_blueprint(upload_others_csv_bp)
 app.register_blueprint(listing_master_bp, url_prefix="/api")
 app.register_blueprint(validation_dashboard_bp)
+app.register_blueprint(dashboard_bp)
 
 # --- Register Listing & Product Blueprints (Batch) ---
 blueprints_listing = [
@@ -174,7 +185,22 @@ if __name__ == '__main__':
     except Exception:
         pass
 
+    # --- Live Terminal Monitor (30s interval) ---
+    def count_monitor():
+        from sqlalchemy import text
+        while True:
+            try:
+                with app.app_context():
+                    raw = db.session.execute(text("SELECT COUNT(*) FROM raw_google_map_drive_data")).fetchone()[0]
+                    val = db.session.execute(text("SELECT COUNT(*) FROM validation_raw_google_map")).fetchone()[0]
+                    master = db.session.execute(text("SELECT COUNT(*) FROM g_map_master_table")).fetchone()[0]
+                    print(f"📊 [LIVE STATUS] Raw: {raw:,} | Validated: {val:,} | Master: {master:,}")
+            except Exception as e:
+                print(f"⚠️ Monitor Error: {e}")
+            gevent.sleep(30)
+
     import gevent
+    monitor_greenlet = gevent.spawn(count_monitor)
     from gevent.pywsgi import WSGIServer
 
     # Create the WSGI Server

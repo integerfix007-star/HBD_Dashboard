@@ -21,7 +21,7 @@ import {
     ChartBarIcon,
 } from "@heroicons/react/24/solid";
 
-const API_BASE = "http://localhost:5000";
+const API_BASE = "http://localhost:8001";
 
 const ValidationReport = ({ embedMode = false, onViewMissing }) => {
     const [reportData, setReportData] = useState(null);
