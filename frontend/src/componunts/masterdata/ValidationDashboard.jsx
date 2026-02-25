@@ -26,7 +26,7 @@ import ValidationReport from './ValidationReport';
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-const API_BASE = "http://localhost:5000";
+const API_BASE = "http://localhost:8001";
 
 const ValidationDashboard = () => {
     const [dashData, setDashData] = useState(null);

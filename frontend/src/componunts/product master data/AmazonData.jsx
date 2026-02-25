@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import ReusableTable from '../Table/ReusableTable'; 
+import ReusableTable from '../Table/ReusableTable';
 
 const AmazonData = () => {
   const [products, setProducts] = useState([]);
@@ -11,10 +11,10 @@ const AmazonData = () => {
       header: "Image",
       accessor: "img",
       render: (row) => (
-        <img 
-          src={row.img} 
-          alt="product" 
-          style={{ width: "50px", height: "50px", objectFit: "contain" }} 
+        <img
+          src={row.img}
+          alt="product"
+          style={{ width: "50px", height: "50px", objectFit: "contain" }}
         />
       )
     },
@@ -44,9 +44,9 @@ const AmazonData = () => {
       header: "Action",
       accessor: "action",
       render: (row) => (
-        <button 
-           style={{ padding: '5px 10px', cursor: 'pointer' }}
-           onClick={() => alert(`View details for ${row.name}`)}
+        <button
+          style={{ padding: '5px 10px', cursor: 'pointer' }}
+          onClick={() => alert(`View details for ${row.name}`)}
         >
           View
         </button>
@@ -57,7 +57,7 @@ const AmazonData = () => {
   // 2. FETCHING: Get data from Flask
   useEffect(() => {
     // Replace this URL with your actual Flask API endpoint
-    fetch('http://localhost:5000/api/amazon-products')
+    fetch('http://localhost:8001/api/amazon-products')
       .then((response) => response.json())
       .then((data) => {
         setProducts(data);

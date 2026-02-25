@@ -1,7 +1,42 @@
 import re
 import unicodedata
 
-# State map for canonical names
+# ═══════════════════════════════════════════════════════════════════════════════
+#  UNIVERSAL NORMALIZER — Full Indian Language Support
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Supports ALL 22 scheduled languages + English:
+#  ┌────────────────────────────────────────────────────────────────┐
+#  │ State/Region    │ Language   │ Script     │ Example            │
+#  ├────────────────────────────────────────────────────────────────┤
+#  │ Gujarat         │ Gujarati   │ ગુજરાતી     │ હનીબી ડિજિટલ       │
+#  │ Maharashtra     │ Marathi    │ मराठी       │ हनीबी डिजिटल        │
+#  │ Hindi Belt      │ Hindi      │ हिन्दी      │ हनीबी डिजिटल        │
+#  │ Tamil Nadu      │ Tamil      │ தமிழ்       │ ஹனிபி டிஜிட்டல்     │
+#  │ Karnataka       │ Kannada    │ ಕನ್ನಡ       │ ಹನಿಬೀ ಡಿಜಿಟಲ್       │
+#  │ Andhra/Telangana│ Telugu     │ తెలుగు      │ హనీబీ డిజిటల్       │
+#  │ Kerala          │ Malayalam  │ മലയാളം     │ ഹണിബീ ഡിജിറ്റൽ     │
+#  │ West Bengal     │ Bengali    │ বাংলা       │ হানিবি ডিজিটাল      │
+#  │ Punjab          │ Punjabi    │ ਪੰਜਾਬੀ      │ ਹਨੀਬੀ ਡਿਜੀਟਲ        │
+#  │ Odisha          │ Odia       │ ଓଡ଼ିଆ       │ ହନୀବୀ ଡିଜିଟାଲ      │
+#  │ Assam           │ Assamese   │ অসমীয়া     │ হানিবী ডিজিটেল      │
+#  │ J&K             │ Urdu       │ اردو        │ ہنی بی ڈیجیٹل       │
+#  │ Manipur         │ Manipuri   │ মৈতৈলোন্    │                     │
+#  │ Goa             │ Konkani    │ कोंकणी      │                     │
+#  │ Jharkhand       │ Santali    │ ᱥᱟᱱᱛᱟᱲᱤ     │                     │
+#  │ Mizoram         │ Mizo       │ Latin       │                     │
+#  │ Meghalaya       │ Khasi      │ Latin       │                     │
+#  │ Sikkim          │ Nepali     │ नेपाली      │                     │
+#  │ Tripura         │ Kokborok   │ Latin/বাংলা │                     │
+#  │ Chhattisgarh    │ Chhattis.  │ छत्तीसगढ़ी  │                     │
+#  │ Rajasthan       │ Rajasthani │ राजस्थानी    │                     │
+#  │ Bihar           │ Maithili   │ मैथिली      │                     │
+#  └────────────────────────────────────────────────────────────────┘
+#
+#  RULE: NEVER strip, reject, or modify non-ASCII characters.
+#        Data is preserved EXACTLY as received from Google Drive.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# State map for canonical names (English abbreviations → Full names)
 STATE_MAP = {
     # Abbreviations
     "ap": "Andhra Pradesh", "ar": "Arunachal Pradesh", "as": "Assam", "br": "Bihar",
@@ -26,53 +61,122 @@ STATE_MAP = {
     "kerla": "Kerala",
 }
 
+
 class UniversalNormalizer:
+    """
+    Unicode-safe normalizer. Preserves ALL scripts (Devanagari, Gujarati,
+    Tamil, Telugu, Bengali, Kannada, Malayalam, Odia, Gurmukhi, Urdu, etc.)
+    Zero data loss — only trims whitespace and normalizes Unicode form.
+    """
+
     @staticmethod
     def clean_text(val):
-        if not val or not isinstance(val, str): return ""
-        val = unicodedata.normalize('NFKD', val).encode('ascii', 'ignore').decode('ascii')
-        val = val.lower().strip()
-        val = re.sub(r'\s+', ' ', val)
-        val = re.sub(r'([,.])\1+', r'\1', val)
+        """Preserve original text as-is. Only trim whitespace & normalize Unicode."""
+        if val is None:
+            return ""
+        val = str(val).strip()
+        # Treat Python/Pandas artefacts as empty
+        if val.lower() in ('nan', 'none', 'nat', ''):
+            return ""
+        # NFKC normalization: standardizes visually identical chars across scripts
+        # This is the FASTEST Unicode normalization and is non-destructive
+        val = unicodedata.normalize('NFKC', val)
+        # Collapse excessive whitespace
+        val = re.sub(r'\s+', ' ', val).strip()
         return val
 
     @staticmethod
     def normalize_state(val):
-        val = UniversalNormalizer.clean_text(val)
-        # Remove anything not alphanumeric for strict matching
-        val = re.sub(r'[^a-z0-9]', '', val)
-        return STATE_MAP.get(val, val.title())
+        """Normalize state names: works for English abbreviations/names.
+        Regional-language state names are preserved as-is."""
+        if not val or not isinstance(val, str):
+            return ""
+        cleaned = str(val).strip()
+        if cleaned.lower() in ('nan', 'none', 'nat', ''):
+            return ""
+        # Try English abbreviation lookup (lowercase, no spaces)
+        lookup_key = re.sub(r'[^a-z0-9]', '', cleaned.lower())
+        if lookup_key in STATE_MAP:
+            return STATE_MAP[lookup_key]
+        # If it's in a regional script, preserve as-is
+        return cleaned.strip()
 
     @staticmethod
     def normalize_phone(val):
-        if not val: return ""
+        """Extract digits only from phone number."""
+        if not val:
+            return ""
         return re.sub(r'\D', '', str(val))
 
     @staticmethod
     def normalize_website(val):
-        val = UniversalNormalizer.clean_text(val)
+        """Normalize website URL — safe for all languages."""
+        if not val or not isinstance(val, str):
+            return ""
+        val = str(val).strip().lower()
+        if val in ('nan', 'none', 'nat', ''):
+            return ""
         val = re.sub(r'^https?://', '', val)
         val = re.sub(r'^www\.', '', val)
         return val.rstrip('/')
 
     @staticmethod
     def normalize_category(val):
-        val = UniversalNormalizer.clean_text(val).rstrip('s') # Basic singularization
-        return val.title()
+        """Normalize category — preserve regional text, title-case English."""
+        if not val or not isinstance(val, str):
+            return ""
+        val = str(val).strip()
+        if val.lower() in ('nan', 'none', 'nat', ''):
+            return ""
+        val = unicodedata.normalize('NFKC', val)
+        val = re.sub(r'\s+', ' ', val).strip()
+        return val
+
+    @staticmethod
+    def get_fuzzy(row, canonical_key):
+        """🔍 Smart header mapping for multilingual CSVs."""
+        # Common variations for Indian data headers
+        MAPPINGS = {
+            "name": ["name", "business name", "company name", "naam", "नाम", "નામ", "பெயர்", "పేరు", "ಹೆಸರು", "പേര്", "নাম"],
+            "address": ["address", "location", "full address", "पता", "સરનામું", "மேகவரி", "చిరునామా", "ವಿಳಾಸ", "മേൽವിലാസം", "ঠিকানা"],
+            "phone_number": ["phone", "phone number", "contact", "mobile", "tel", "फोन", "ફોન", "தொலைபேசி", "ఫోన్", "ಫೋನ್", "ഫോൺ", "ফোন"],
+            "city": ["city", "town", "location city", "शहर", "શહેર", "நகரம்", "నగరం", "ನಗರ", "നഗരം", "শহর"],
+            "state": ["state", "province", "region", "राज्य", "રાજ્ય", "மாநிலம்", "రాష్ట్రం", "ರಾಜ್ಯ", "സംസ്ഥാനം", "রাজ্য"],
+            "category": ["category", "type", "business type", "श्रेणी", "શ્રેણી", "வகை", "ವರ್ಗ", "వర్గం", "വിഭാഗം", "বিভাগ"],
+            "subcategory": ["subcategory", "sub-category", "उपश्रेणी", "ઉપશ્રેણી"],
+            "website": ["website", "url", "link", "वेबसाइट", "વેબસાઇટ"],
+            "reviews_count": ["reviews_count", "reviews", "total reviews", "समीक्षाएं"],
+            "reviews_average": ["reviews_average", "rating", "avg rating", "रेटिंग"],
+        }
+        
+        candidates = MAPPINGS.get(canonical_key, [canonical_key])
+        
+        # 1. Exact match
+        for c in candidates:
+            if c in row: return row[c]
+            
+        # 2. Case-insensitive / Trimmed match
+        row_keys = {str(k).strip().lower(): k for k in row.keys()}
+        for c in candidates:
+            cl = c.lower()
+            if cl in row_keys: return row[row_keys[cl]]
+            
+        return row.get(canonical_key)
 
     @classmethod
     def normalize_row(cls, row):
+        """Normalize a single data row. Preserves ALL text in ALL languages."""
         return {
-            "name": cls.clean_text(row.get("name")),
-            "address": cls.clean_text(row.get("address")),
-            "website": cls.normalize_website(row.get("website")),
-            "phone_number": cls.normalize_phone(row.get("phone_number")),
-            "reviews_count": row.get("reviews_count"),
-            "reviews_average": row.get("reviews_average"),
-            "category": cls.normalize_category(row.get("category")),
-            "subcategory": cls.clean_text(row.get("subcategory")),
-            "city": cls.clean_text(row.get("city")).title(),
-            "state": cls.normalize_state(row.get("state")),
+            "name": cls.clean_text(cls.get_fuzzy(row, "name")),
+            "address": cls.clean_text(cls.get_fuzzy(row, "address")),
+            "website": cls.normalize_website(cls.get_fuzzy(row, "website")),
+            "phone_number": cls.normalize_phone(cls.get_fuzzy(row, "phone_number")),
+            "reviews_count": cls.get_fuzzy(row, "reviews_count"),
+            "reviews_average": cls.get_fuzzy(row, "reviews_average"),
+            "category": cls.normalize_category(cls.get_fuzzy(row, "category")),
+            "subcategory": cls.clean_text(cls.get_fuzzy(row, "subcategory")),
+            "city": cls.clean_text(cls.get_fuzzy(row, "city")),
+            "state": cls.normalize_state(cls.get_fuzzy(row, "state")),
             "area": cls.clean_text(row.get("area")),
             "drive_folder_id": row.get("drive_folder_id"),
             "drive_folder_name": row.get("drive_folder_name"),

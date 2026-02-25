@@ -19,9 +19,10 @@ DB_PORT = os.getenv('DB_PORT')
 
 print("DEBUG ENV -> HOST:", DB_HOST, "USER:", DB_USER, "PASS:", DB_PASSWORD, "DB:", DB_NAME)
 
+import urllib.parse
 # Construct database URL dynamically from environment variables
 DATABASE_URL = (
-    f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}"
+    f"mysql+pymysql://{DB_USER}:{urllib.parse.quote_plus(DB_PASSWORD or '')}"
     f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
 

@@ -83,7 +83,8 @@ celery.conf.update(
     timezone='UTC',
     enable_utc=True,
     # Optimizations:
-    worker_prefetch_multiplier=1,      # Prevent worker from hoarding tasks (fair distribution)
+    worker_concurrency=50,             # High-speed: 50 parallel greenlets
+    worker_prefetch_multiplier=4,      # Grab 4 tasks at once for speed
     task_acks_late=True,               # Only ack after successful return (reliability)
     task_reject_on_worker_lost=True,   # Re-queue task if worker crashes
     result_expires=86400,              # Expire results after 24h to save Redis RAM
