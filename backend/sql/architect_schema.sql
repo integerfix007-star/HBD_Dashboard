@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS raw_clean_google_map_data (
 
     -- INDEXES
     UNIQUE INDEX idx_raw_id (raw_id),
-    UNIQUE INDEX idx_composite_dedup (name(100), address(100), phone_number)
+    UNIQUE INDEX idx_composite_dedup (name(100), phone_number, city(50), address(100))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------------------------------
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS g_map_master_table (
     state VARCHAR(255),
     area VARCHAR(255),
     created_at DATETIME,
-    UNIQUE INDEX idx_unique_business (name(100), phone_number, address(100))
+    UNIQUE INDEX idx_unique_business (name(100), phone_number, city(50), address(100))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------------------------------

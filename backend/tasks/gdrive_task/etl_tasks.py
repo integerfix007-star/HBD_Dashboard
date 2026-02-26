@@ -143,41 +143,16 @@ def get_file_hash(file_id, modified_time):
 
 # SECTION 3: Batched Insert Optimization (with Deadlock Retry + Rate Limiting)
 
-def _super_normalize(val):
-    """Strip ALL symbols, dashes, commas, periods, and extra spaces. Unicode-safe."""
-    if not val:
-        return ""
-    try:
-        import re as _re
-        # Remove everything that is NOT a letter, digit, or whitespace (keeps all Unicode scripts)
-        cleaned = _re.sub(r'[^\w\s]', '', str(val), flags=_re.UNICODE)
-        # Collapse whitespace and lowercase
-        return _re.sub(r'\s+', '', cleaned).lower().strip()
-    except Exception:
-        return str(val).lower().strip()
-
-
-def _super_normalize_phone(val):
-    """Keep only digits from phone number."""
-    if not val:
-        return ""
-    try:
-        import re as _re
-        return _re.sub(r'\D', '', str(val))
-    except Exception:
-        return str(val).strip()
-
-
 def commit_batch(batch, task_id=None):
     """
-    Inserts a BATCH of rows efficiently. Atomic within the batch.
-    Uses Super-Normalization for strong deduplication.
+    Inserts a BATCH of rows efficiently. 
+    NO deduplication - inserts EVERYTHING as requested.
     """
     if not batch:
         return 0
         
     sql = text("""
-        INSERT IGNORE INTO raw_google_map_drive_data (
+        INSERT INTO raw_google_map_drive_data (
             name, address, website, phone_number, 
             reviews_count, reviews_average, 
             category, subcategory, city, state, area, 
@@ -195,58 +170,25 @@ def commit_batch(batch, task_id=None):
         )
     """)
     
-    # Pre-process batch with metadata + Super-Normalized deduplication
-    unique_batch = []
-    try:
-        r = redis.from_url(os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"))
-        
-        # Build all fingerprints first
-        hashes = []
-        for row in batch:
-            row['etl_version'] = ETL_VERSION
-            row['task_id'] = task_id
-            
-            # Super-Normalized Identity (ignores symbols, dashes, commas, city differences)
-            clean_name = _super_normalize(row.get('name', ''))
-            clean_phone = _super_normalize_phone(row.get('phone_number', ''))
-            clean_address = _super_normalize(row.get('address', ''))
-            
-            identity_string = f"{clean_name}|{clean_phone}|{clean_address}"
-            row_hash = hashlib.md5(identity_string.encode('utf-8')).hexdigest()
-            hashes.append((row, row_hash))
-        
-        # Redis Pipeline: check all hashes in ONE network call
-        pipe = r.pipeline(transaction=False)
-        for _, row_hash in hashes:
-            pipe.sadd("gdrive_etl_unique_records", row_hash)
-        results = pipe.execute()
-        
-        # Only keep rows where Redis returned 1 (newly added = not a duplicate)
-        for i, (row, row_hash) in enumerate(hashes):
-            if results[i]:  # 1 = new, 0 = already existed
-                unique_batch.append(row)
-                
-    except Exception as e:
-        logger.warning(f"Redis deduplication failed in batch: {e}")
-        # Fallback: add metadata and pass all rows (INSERT IGNORE handles DB-level dupes)
-        for row in batch:
-            row['etl_version'] = ETL_VERSION
-            row['task_id'] = task_id
-        unique_batch = batch
-
-    if not unique_batch:
-        return 0
+    # Enrich batch with metadata (Required for schema)
+    for row in batch:
+        row['etl_version'] = ETL_VERSION
+        row['task_id'] = task_id
 
     try:
         with engine.begin() as conn:
-            result = conn.execute(sql, unique_batch)
+            result = conn.execute(sql, batch)
             inserted = result.rowcount
             if inserted > 0:
                 rows_inserted.inc(inserted)
-            logger.info(f"⚡ Committed batch: {inserted} unique rows.")
+            logger.info(f"⚡ Committed batch: {inserted} rows (No Deduplication).")
             return inserted
     except Exception as e:
-        logger.error(f"Batch Insert Failed: {e}")
+        # 🔗 Strip long parameters dump from the error message for cleaner logs
+        msg = str(e)
+        if "[parameters:" in msg:
+            msg = msg.split("[parameters:")[0] + " [Parameters hidden for brevity]"
+        logger.error(f"❌ Batch Insert Failed: {msg.strip()}")
         return 0
 
 
@@ -376,6 +318,11 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
     global shutdown_requested
     start_time = time.time()
     task_id = self.request.id
+    
+    # 🕒 ISO 8601 -> MySQL (YYYY-MM-DD HH:MM:SS)
+    if modified_time and 'T' in str(modified_time):
+        modified_time = str(modified_time).replace('T', ' ').replace('Z', '').split('.')[0]
+        
     file_hash = get_file_hash(file_id, modified_time)
     
     # 1. Check for existing checkpoint (Idempotency Phase 3)
@@ -392,7 +339,7 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
             reader = csv.DictReader(stream)
             current_row_idx = 0
             batch = []
-            BATCH_THRESHOLD = 2000 # High-speed: 4x fewer DB round-trips
+            BATCH_THRESHOLD = 5000 # 🚀 Turbo: 2.5x fewer DB commits than before
             
             for row in reader:
                 current_row_idx += 1
@@ -409,7 +356,7 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
                     return f"Paused: {file_name} at row {current_row_idx-1}"
                 
                 # Normalize
-                norm_row = UniversalNormalizer.normalize_row({
+                norm_row = UniversalNormalizer.normalize_row_raw({
                     **row, "drive_file_id": file_id, "drive_file_name": file_name,
                     "drive_folder_id": folder_id, "drive_folder_name": folder_name,
                     "drive_file_path": path, "drive_uploaded_time": modified_time

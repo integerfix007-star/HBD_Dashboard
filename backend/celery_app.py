@@ -82,12 +82,13 @@ celery.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
-    # Optimizations:
-    worker_concurrency=50,             # High-speed: 50 parallel greenlets
-    worker_prefetch_multiplier=4,      # Grab 4 tasks at once for speed
-    task_acks_late=True,               # Only ack after successful return (reliability)
-    task_reject_on_worker_lost=True,   # Re-queue task if worker crashes
-    result_expires=86400,              # Expire results after 24h to save Redis RAM
+    # 🚀 Turbo Optimizations:
+    worker_concurrency=50,             
+    worker_prefetch_multiplier=10,     
+    task_ignore_result=True,           
+    task_acks_late=True,               
+    task_reject_on_worker_lost=True,   
+    result_expires=3600,              
 )
 
 # SECTION 6: Periodic Stats Refresh Schedule

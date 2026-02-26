@@ -237,6 +237,8 @@ class GDriveHighSpeedIngestor:
             
         # Register folder scan as done
         mod_time = items[0].get('modifiedTime') if items else datetime.utcnow().isoformat() + "Z"
+        if 'T' in mod_time: 
+            mod_time = mod_time.replace('T', ' ').replace('Z', '').split('.')[0]
         self.register_folder(folder_id, folder_name, mod_time, len(csv_files))
 
     # REMOVED: download_csv, worker_consumer, process_file, commit_batch
@@ -342,20 +344,27 @@ class GDriveHighSpeedIngestor:
         logger.info(f"✨ Reactive Cycle dispatched in {time.time() - start_time:.2f}s")
 
 
-class ValidationCleaningProcessor:
+class ValidationQualityProcessor:
     """
-    🛡️ Continuous Validation & Cleaning Layer
-    Processes raw_google_map_drive_data -> validation_raw_google_map -> raw_clean_google_map_data
-    Ensures zero data loss, multilingual safety, and logical duplicate detection.
+    🛡️ Continuous Validation, Cleaning & Master Sync Layer
+    Processes raw_google_map_drive_data -> raw_clean_google_map_data & master_table
+    Ensures zero data loss, applying robust validation, normalization, and deduplication.
     """
     def __init__(self, engine, shutdown_event):
         self.engine = engine
         self.shutdown_event = shutdown_event
-        self.batch_size = 10000 # High-speed: process 10k rows per cycle
+        self.batch_size = 20000 # 🚀 Turbo: Process 20k rows per cycle (Up from 10k)
 
     def get_last_processed_id(self):
         try:
             with self.engine.connect() as conn:
+                # Priority 1: Check newest log entry for last_id
+                res = conn.execute(text("SELECT last_id FROM data_validation_log ORDER BY id DESC LIMIT 1"))
+                row = res.fetchone()
+                if row and row[0]:
+                    return int(row[0])
+                
+                # Priority 2: Fallback to etl_metadata
                 res = conn.execute(text("SELECT meta_value FROM etl_metadata WHERE meta_key='last_processed_id'"))
                 row = res.fetchone()
                 return int(row[0]) if row and str(row[0]).isdigit() else 0
@@ -378,8 +387,8 @@ class ValidationCleaningProcessor:
             with self.engine.begin() as conn:
                 conn.execute(text("""
                     INSERT INTO data_validation_log 
-                    (total_processed, missing_count, valid_count, duplicate_count, cleaned_count, timestamp)
-                    VALUES (:total, :missing, :valid, :duplicate, :cleaned, NOW())
+                    (total_processed, missing_count, valid_count, duplicate_count, cleaned_count, last_id, timestamp)
+                    VALUES (:total, :missing, :valid, :duplicate, :cleaned, :last_id, NOW())
                 """), summary)
         except Exception as e:
             logger.error(f"Failed to log validation batch: {e}")
@@ -417,49 +426,47 @@ class ValidationCleaningProcessor:
 
     def check_duplicates_batch(self, signatures, conn):
         """Batch check signatures against the clean table."""
-        if not signatures: return set()
-        
-        # We check exactly against the composite index for speed
-        check_query = text("""
-            SELECT name, phone_number, address FROM raw_clean_google_map_data 
-            WHERE (phone_number, name, address) IN :sigs
-        """)
-        
-        # Format for Tuple IN clause in MySQL
-        # Construct raw string for IN clause as fallback or use parameter binding
-        # Faster approach: Hash-based duplicate check using MD5 in Python
-        # Instead of slow tuple IN clause, we hash signatures and compare sets
+        """
+        Fast hash-based duplicate check against raw_clean_google_map_data.
+        Uses 4-field signature: (phone, name, address, city)
+        """
+        if not signatures:
+            return set()
         
         results = set()
         sig_list = list(signatures)
         
-        # Build hash lookup for existing clean data
-        for i in range(0, len(sig_list), 2000):
-            batch = sig_list[i:i+2000]
-            # Build WHERE clause with OR conditions for speed
+        for i in range(0, len(sig_list), 5000): # 🚀 Turbo: Larger sub-batches (5k)
+            batch = sig_list[i:i+5000]
             conditions = []
             params = {}
-            for idx, (phone, name, addr) in enumerate(batch):
-                conditions.append(f"(phone_number = :p{idx} AND LOWER(TRIM(name)) = :n{idx})")
+            for idx, (phone, name, addr, city) in enumerate(batch):
+                conditions.append(f"(phone_number = :p{idx} AND LOWER(TRIM(name)) = :n{idx} AND LOWER(TRIM(COALESCE(address,''))) = :a{idx} AND LOWER(TRIM(COALESCE(city,''))) = :c{idx})")
                 params[f"p{idx}"] = phone
                 params[f"n{idx}"] = name
+                params[f"a{idx}"] = addr
+                params[f"c{idx}"] = city
             
             if not conditions:
                 continue
                 
-            query = f"SELECT LOWER(TRIM(name)) as n, phone_number as p, LOWER(TRIM(address)) as a FROM raw_clean_google_map_data WHERE {' OR '.join(conditions)}"
+            query = f"""SELECT LOWER(TRIM(name)) as n, phone_number as p, 
+                              LOWER(TRIM(COALESCE(address,''))) as a, 
+                              LOWER(TRIM(COALESCE(city,''))) as ct
+                       FROM raw_clean_google_map_data 
+                       WHERE {' OR '.join(conditions)}"""
             try:
                 rows = conn.execute(text(query), params).fetchall()
                 for r in rows:
-                    results.add((str(r[1]), str(r[0]), str(r[2])))
+                    results.add((str(r[1]), str(r[0]), str(r[2]), str(r[3])))
             except Exception as e:
                 logger.warning(f"Duplicate check sub-batch failed: {e}")
         return results
 
     def start_pipeline(self):
-        """Main loop for the validation thread."""
+        """Main loop for the quality assurance and master sync thread."""
         last_id = self.get_last_processed_id()
-        logger.info(f"🛡️ Validation Processor Started from ID: {last_id}")
+        logger.info(f"🛡️ Data Quality Processor Started from ID: {last_id}")
         
         while not self.shutdown_event.is_set():
             try:
@@ -468,11 +475,11 @@ class ValidationCleaningProcessor:
                     # READ UNCOMMITTED: prevents locking raw table during read
                     conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"))
                     
-                    # 1. Fetch batch — only needed columns (faster than SELECT *)
+                    # 1. Fetch batch from Tier 1 (Raw)
                     rows = conn.execute(text("""
                         SELECT id, name, address, website, phone_number, 
-                               reviews_count, reviews_average, category, subcategory, 
-                               city, state, area, created_at
+                                reviews_count, reviews_average, category, subcategory, 
+                                city, state, area, created_at
                         FROM raw_google_map_drive_data 
                         WHERE id > :last_id 
                         ORDER BY id ASC 
@@ -495,30 +502,27 @@ class ValidationCleaningProcessor:
                     
                     current_max_id = last_id
                     
-                    # 2. Process batch in memory
-                    validation_batch = []
-                    invalid_audit_batch = []
+                    # 2. Process batch in memory with FULL NORMALIZATION
                     clean_data_batch = []
                     master_data_batch = []
                     
-                    # Pre-calculate signatures for bulk duplicate check
                     batch_rows = []
                     signatures = set()
                     
                     for row_obj in rows:
-                        row = row_obj._asdict() if hasattr(row_obj, '_asdict') else row_obj._mapping
-                        batch_rows.append(row)
-                        current_max_id = max(current_max_id, row['id'])
+                        # Convert to dict and apply FULL Normalization first (as per user request)
+                        raw_row = row_obj._asdict() if hasattr(row_obj, '_asdict') else row_obj._mapping
+                        norm_row = UniversalNormalizer.normalize_row_full(dict(raw_row))
+                        norm_row['id'] = raw_row['id'] # Preserve original ID for tracking
                         
-                        # Pre-validate and extract phone
-                        raw_phone = str(row.get('phone_number', '') or '')
-                        clean_phone = re.sub(r'\D', '', raw_phone)
-                        norm_name = str(row.get('name', '') or '').strip().lower()
-                        norm_addr = str(row.get('address', '') or '').strip().lower()
+                        batch_rows.append(norm_row)
+                        current_max_id = max(current_max_id, norm_row['id'])
                         
-                        signatures.add((clean_phone, norm_name, norm_addr))
+                        # Pre-calculate signatures for bulk duplicate check (Normalized)
+                        sig = (norm_row['phone_number'], norm_row['name'].lower(), norm_row['address'].lower(), norm_row['city'].lower())
+                        signatures.add(sig)
 
-                    # Bulk Duplicate Check (same connection, no overhead)
+                    # Bulk Duplicate Check (against Clean Table)
                     existing_sigs = self.check_duplicates_batch(signatures, conn)
                     
                     # Switch back to safe mode for writes
@@ -526,112 +530,95 @@ class ValidationCleaningProcessor:
 
                     for row in batch_rows:
                         batch_summary["total"] += 1
+                        
+                        # Apply Validation Logic on Normalized Data
                         is_structured, is_valid, missing_list, invalid_list, clean_phone = self.validate_row(row)
                         
-                        norm_name = str(row.get('name', '') or '').strip().lower()
-                        norm_addr = str(row.get('address', '') or '').strip().lower()
-                        sig = (clean_phone, norm_name, norm_addr)
+                        sig = (row['phone_number'], row['name'].lower(), row['address'].lower(), row['city'].lower())
                         is_duplicate = sig in existing_sigs if is_structured else False
 
                         # Determine status
-                        if not is_structured: status = "MISSING"; batch_summary["missing"] += 1
-                        elif is_duplicate: status = "DUPLICATE"; batch_summary["duplicate"] += 1
-                        elif not is_valid: status = "INVALID"
-                        else: status = "VALID"
+                        status = "VALID"
+                        if not is_structured: 
+                            status = "MISSING"
+                            batch_summary["missing"] += 1
+                        elif is_duplicate: 
+                            status = "DUPLICATE"
+                            batch_summary["duplicate"] += 1
+                        elif not is_valid: 
+                            status = "INVALID"
+                        else:
+                            batch_summary["valid"] += 1
 
-                        # 3. Queue for Validation Table
-                        validation_batch.append({
-                            "raw_id": row['id'], "name": row['name'], "address": row['address'], "website": row['website'],
-                            "phone_number": row['phone_number'], "reviews_count": row.get('reviews_count', 0),
-                            "reviews_avg": row.get('reviews_average', 0.00), "category": row['category'],
-                            "subcategory": row['subcategory'], "city": row['city'], "state": row['state'],
-                            "area": row['area'], "created_at": row.get('created_at') or datetime.now(),
-                            "status": status, "missing": ",".join(missing_list) if missing_list else None,
-                            "invalid": ",".join(invalid_list) if invalid_list else None
-                        })
+                        # 3. Track statistics only (Audit table removed)
+                        # No audit insertion per user request
 
-                        # 4. Queue for Invalid Audit
-                        if status in ["MISSING", "INVALID"]:
-                            invalid_audit_batch.append({
-                                "raw_id": row['id'], "name": row['name'], "address": row['address'], "website": row['website'],
-                                "phone": clean_phone, "bank": row['phone_number'],
+                        # 4. Queue for Clean & Master (If successful OR error-tracking for clean table)
+                        if status in ["VALID", "MISSING", "INVALID", "DUPLICATE"]:
+                            clean_data_batch.append({
+                                "raw_id": row['id'], "name": row['name'], "address": row['address'],
+                                "website": row['website'], "phone": row['phone_number'], 
                                 "reviews": row.get('reviews_count', 0), "avg": row.get('reviews_average', 0.00),
                                 "cat": row['category'], "sub": row['subcategory'], "city": row['city'],
-                                "state": row['state'], "area": row['area'], "label": status,
-                                "missing": ",".join(missing_list) if missing_list else None,
-                                "invalid": ",".join(invalid_list) if invalid_list else None,
-                                "reason": f"Missing: {','.join(missing_list)} | Invalid: {','.join(invalid_list)}"
+                                "state": row['state'], "area": row['area'], "created": row.get('created_at') or datetime.now(),
+                                "val_status": status, 
+                                "clean_status": "CLEANED" if status == "VALID" else "FAILED_VALIDATION" if status != "DUPLICATE" else "DUPLICATE_FOUND", 
+                                "missing": ",".join(missing_list) if missing_list else None, 
+                                "invalid": ",".join(invalid_list) if invalid_list else None, 
+                                "duplicate_reason": "Exact match (Phone, Name, Address, City)" if status == "DUPLICATE" else None, 
+                                "processed_at": datetime.now()
                             })
+                            
+                            # ONLY Valid rows go to Master
+                            if status == "VALID":
+                                master_data_batch.append({
+                                    "name": row['name'],
+                                    "address": row['address'],
+                                    "website": row['website'],
+                                    "phone_number": row['phone_number'],
+                                    "reviews_count": int(row.get('reviews_count', 0)),
+                                    "reviews_avg": float(row.get('reviews_average', 0.00)),
+                                    "category": row['category'],
+                                    "subcategory": row['subcategory'],
+                                    "city": row['city'],
+                                    "state": row['state'],
+                                    "area": row['area'],
+                                    "created_at": row.get('created_at') or datetime.now()
+                                })
+                                batch_summary["cleaned"] += 1
 
-                        # 5. Queue for Production
-                        if status == "VALID":
-                            batch_summary["valid"] += 1
-                            clean_data_batch.append({
-                                "raw_id": row['id'], "name": str(row['name']).strip(), "address": str(row['address']).strip(),
-                                "website": str(row['website']).lower().strip() if row['website'] else None,
-                                "phone": clean_phone, "reviews": row.get('reviews_count', 0), "avg": row.get('reviews_average', 0.00),
-                                "cat": row['category'], "sub": row['subcategory'], "city": row['city'],
-                                "state": row['state'], "area": row['area'], "created": row.get('created_at') or datetime.now()
-                            })
-                            master_data_batch.append({
-                                "name": str(row['name']).strip(), "address": str(row['address']).strip(),
-                                "website": str(row['website']).lower().strip() if row['website'] else None,
-                                "phone": clean_phone, "reviews": row.get('reviews_count', 0), "avg": row.get('reviews_average', 0.00),
-                                "cat": row['category'], "sub": row['subcategory'], "city": row['city'],
-                                "state": row['state'], "area": row['area'], "created": row.get('created_at') or datetime.now()
-                            })
-                            batch_summary["cleaned"] += 1
-
-                    # 6. Execute Batch Writes (same transaction — atomic)
-                    if validation_batch:
-                        conn.execute(text("""
-                            INSERT INTO validation_raw_google_map 
-                            (raw_id, name, address, website, phone_number, reviews_count, reviews_avg, 
-                             category, subcategory, city, state, area, created_at, 
-                             validation_status, missing_fields, invalid_format_fields, processed_at)
-                            VALUES 
-                            (:raw_id, :name, :address, :website, :phone_number, :reviews_count, :reviews_avg,
-                             :category, :subcategory, :city, :state, :area, :created_at,
-                             :status, :missing, :invalid, NOW())
-                            ON DUPLICATE KEY UPDATE validation_status = VALUES(validation_status), processed_at = NOW()
-                        """), validation_batch)
-
-                    if invalid_audit_batch:
-                        conn.execute(text("""
-                            INSERT INTO invalid_google_map_data 
-                            (raw_id, name, address, website, phone_number, bank_number, 
-                             reviews_count, reviews_avg, category, subcategory, city, state, area,
-                             validation_label, missing_fields, invalid_format_fields, error_reason, created_at)
-                            VALUES 
-                            (:raw_id, :name, :address, :website, :phone, :bank,
-                             :reviews, :avg, :cat, :sub, :city, :state, :area,
-                             :label, :missing, :invalid, :reason, NOW())
-                        """), invalid_audit_batch)
+                    # 4. Execute Batch Writes (Clean & Master ONLY)
 
                     if clean_data_batch:
                         conn.execute(text("""
                             INSERT IGNORE INTO raw_clean_google_map_data 
                             (raw_id, name, address, website, phone_number, reviews_count, reviews_avg,
-                             category, subcategory, city, state, area, created_at)
-                            VALUES (:raw_id, :name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created)
+                             category, subcategory, city, state, area, created_at,
+                             validation_status, cleaning_status, missing_fields, invalid_format_fields, duplicate_reason, processed_at)
+                            VALUES (:raw_id, :name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created,
+                                    :val_status, :clean_status, :missing, :invalid, :duplicate_reason, :processed_at)
                         """), clean_data_batch)
                         
                     if master_data_batch:
                         conn.execute(text("""
                             INSERT IGNORE INTO g_map_master_table 
                             (name, address, website, phone_number, reviews_count, reviews_avg, category, subcategory, city, state, area, created_at)
-                            VALUES (:name, :address, :website, :phone, :reviews, :avg, :cat, :sub, :city, :state, :area, :created)
+                            VALUES (:name, :address, :website, :phone_number, :reviews_count, :reviews_avg, :category, :subcategory, :city, :state, :area, :created_at)
                         """), master_data_batch)
 
-                # 7. Finalize batch
+                # 6. Finalize batch
+                batch_summary['last_id'] = current_max_id
                 self.update_last_processed_id(current_max_id)
                 self.log_validation_batch(batch_summary)
                 last_id = current_max_id
                 
-                logger.info(f"🛡️ Batch Complete: Processed {batch_summary['total']} rows. Last ID: {last_id}")
+                logger.info(f"🛡️ Quality Cycle Complete: Processed {batch_summary['total']} rows. Last ID: {last_id}")
 
             except Exception as e:
-                logger.error(f"🛡️ Validation Loop Error: {e}")
+                msg = str(e)
+                if "[parameters:" in msg:
+                    msg = msg.split("[parameters:")[0] + " [Parameters hidden]"
+                logger.error(f"🛡️ Validation Loop Error: {msg.strip()}")
                 if self.shutdown_event.wait(timeout=10):
                     break
 
@@ -658,8 +645,8 @@ def start_background_etl():
     t_scanner.start()
 
     # Start Validation & Cleaning Thread
-    validator = ValidationCleaningProcessor(ingestor.engine, ingestor.shutdown_event)
-    t_validator = threading.Thread(target=validator.start_pipeline, name="ValidatorThread", daemon=True)
+    validator = ValidationQualityProcessor(ingestor.engine, ingestor.shutdown_event)
+    t_validator = threading.Thread(target=validator.start_pipeline, name="QualityThread", daemon=True)
     t_validator.start()
 
     return ingestor
