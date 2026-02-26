@@ -82,12 +82,25 @@ celery.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
-    # Optimizations:
-    worker_concurrency=50,             # High-speed: 50 parallel greenlets
-    worker_prefetch_multiplier=4,      # Grab 4 tasks at once for speed
-    task_acks_late=True,               # Only ack after successful return (reliability)
-    task_reject_on_worker_lost=True,   # Re-queue task if worker crashes
-    result_expires=86400,              # Expire results after 24h to save Redis RAM
+    # Stable Optimizations:
+    worker_concurrency=6,              # Reduced to prevent resource exhaustion
+    worker_prefetch_multiplier=2,     
+    task_ignore_result=True,           
+    task_acks_late=True,               
+    task_reject_on_worker_lost=True,   
+    result_expires=3600,
+    # Redis Resilience:
+    broker_connection_retry_on_startup=True,    # Auto-reconnect if Redis restarts
+    broker_connection_retry=True,               # Keep retrying on connection loss
+    broker_connection_max_retries=None,          # Never stop trying
+    worker_cancel_long_running_tasks_on_connection_loss=True,  # Clean up on disconnect
+    broker_transport_options={
+        'health_check_interval': 10,
+        'socket_timeout': 30,
+        'socket_connect_timeout': 30,
+        'retry_on_timeout': True,
+        'socket_keepalive': True,
+    },
 )
 
 # SECTION 6: Periodic Stats Refresh Schedule

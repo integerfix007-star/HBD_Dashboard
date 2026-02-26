@@ -11,3 +11,5 @@ backend/*.log
 *.log
 backend/.agent
 backend/.github/
+*.md
+*.pdf

@@ -20,11 +20,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from celery import shared_task
 from dotenv import load_dotenv
-import redis
 
 from model.normalizer import UniversalNormalizer
-# from model.csv_schema import BusinessRecord (Validation removed)
-# from pydantic import ValidationError
 
 from celery.utils.log import get_task_logger
 
@@ -60,8 +57,8 @@ ETL_VERSION = "2.0.0"
 # SECTION 1: Optimized SQLAlchemy Engine (High Throughput)
 engine = create_engine(
     DATABASE_URI,
-    pool_size=35,            # High-speed: more concurrent connections
-    max_overflow=20,         # Extra burst capacity
+    pool_size=10,            # Conservative pool to avoid exhaustion
+    max_overflow=5,          # Limited burst capacity
     pool_timeout=30,        
     pool_recycle=1800,      
     pool_pre_ping=True      
@@ -105,24 +102,12 @@ def download_csv(service, file_id, max_size_mb=None):
     NO local files, NO temp files, NO ByteIO accumulation of full file.
     """
     request = service.files().get_media(fileId=file_id)
-    # Use io.BytesIO() only as a small buffer for the current chunk if needed, 
-    # but more efficiently, we can use the stream directly.
-    # Actually, MediaIoBaseDownload needs a writable stream.
-    # To truly stream without downloading the WHOLE file into memory at once:
-    # We use request.execute() but that's for small files.
-    # For large files, we use get_media().
     
     import io
     from googleapiclient.http import MediaIoBaseDownload
     
-    # We'll use a wrapper that behaves like a file but fetches on demand if possible.
-    # However, MediaIoBaseDownload is designed to "download" into a stream.
-    # If we want TRUE row-by-row without full download, we should use:
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, request, chunksize=1024*1024) # 1MB chunks
-    
-    # Actually, the requirement "Use Drive API streaming" usually refers to:
-    # Downloading the file in chunks and processing it.
     
     done = False
     while not done:
@@ -143,41 +128,41 @@ def get_file_hash(file_id, modified_time):
 
 # SECTION 3: Batched Insert Optimization (with Deadlock Retry + Rate Limiting)
 
-def _super_normalize(val):
-    """Strip ALL symbols, dashes, commas, periods, and extra spaces. Unicode-safe."""
-    if not val:
-        return ""
-    try:
-        import re as _re
-        # Remove everything that is NOT a letter, digit, or whitespace (keeps all Unicode scripts)
-        cleaned = _re.sub(r'[^\w\s]', '', str(val), flags=_re.UNICODE)
-        # Collapse whitespace and lowercase
-        return _re.sub(r'\s+', '', cleaned).lower().strip()
-    except Exception:
-        return str(val).lower().strip()
-
-
-def _super_normalize_phone(val):
-    """Keep only digits from phone number."""
-    if not val:
-        return ""
-    try:
-        import re as _re
-        return _re.sub(r'\D', '', str(val))
-    except Exception:
-        return str(val).strip()
-
-
 def commit_batch(batch, task_id=None):
     """
-    Inserts a BATCH of rows efficiently. Atomic within the batch.
-    Uses Super-Normalization for strong deduplication.
+    Inserts a BATCH of rows efficiently. 
+    NO deduplication - inserts EVERYTHING as requested.
+    Includes retry logic for transient DB errors.
     """
     if not batch:
         return 0
+    
+    # Sanitize all values before insertion to prevent ANY DB error
+    for row in batch:
+        row['etl_version'] = ETL_VERSION
+        row['task_id'] = task_id
+        # Ensure drive_uploaded_time is MySQL-safe
+        dt = row.get('drive_uploaded_time')
+        if dt and isinstance(dt, str) and 'T' in dt:
+            dt = dt.replace('T', ' ').replace('Z', '').split('.')[0]
+            row['drive_uploaded_time'] = dt
+        # Ensure numeric fields are safe
+        try:
+            row['reviews_count'] = int(row.get('reviews_count') or 0)
+        except (ValueError, TypeError):
+            row['reviews_count'] = 0
+        try:
+            row['reviews_average'] = float(row.get('reviews_average') or 0.0)
+        except (ValueError, TypeError):
+            row['reviews_average'] = 0.0
+        # Truncate long strings to prevent DB overflow
+        for key in ['name', 'address', 'website', 'phone_number', 'category', 'subcategory', 'city', 'state', 'area']:
+            val = row.get(key)
+            if val and isinstance(val, str) and len(val) > 500:
+                row[key] = val[:500]
         
     sql = text("""
-        INSERT IGNORE INTO raw_google_map_drive_data (
+        INSERT INTO raw_google_map_drive_data (
             name, address, website, phone_number, 
             reviews_count, reviews_average, 
             category, subcategory, city, state, area, 
@@ -195,59 +180,37 @@ def commit_batch(batch, task_id=None):
         )
     """)
     
-    # Pre-process batch with metadata + Super-Normalized deduplication
-    unique_batch = []
-    try:
-        r = redis.from_url(os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"))
-        
-        # Build all fingerprints first
-        hashes = []
-        for row in batch:
-            row['etl_version'] = ETL_VERSION
-            row['task_id'] = task_id
-            
-            # Super-Normalized Identity (ignores symbols, dashes, commas, city differences)
-            clean_name = _super_normalize(row.get('name', ''))
-            clean_phone = _super_normalize_phone(row.get('phone_number', ''))
-            clean_address = _super_normalize(row.get('address', ''))
-            
-            identity_string = f"{clean_name}|{clean_phone}|{clean_address}"
-            row_hash = hashlib.md5(identity_string.encode('utf-8')).hexdigest()
-            hashes.append((row, row_hash))
-        
-        # Redis Pipeline: check all hashes in ONE network call
-        pipe = r.pipeline(transaction=False)
-        for _, row_hash in hashes:
-            pipe.sadd("gdrive_etl_unique_records", row_hash)
-        results = pipe.execute()
-        
-        # Only keep rows where Redis returned 1 (newly added = not a duplicate)
-        for i, (row, row_hash) in enumerate(hashes):
-            if results[i]:  # 1 = new, 0 = already existed
-                unique_batch.append(row)
-                
-    except Exception as e:
-        logger.warning(f"Redis deduplication failed in batch: {e}")
-        # Fallback: add metadata and pass all rows (INSERT IGNORE handles DB-level dupes)
-        for row in batch:
-            row['etl_version'] = ETL_VERSION
-            row['task_id'] = task_id
-        unique_batch = batch
-
-    if not unique_batch:
-        return 0
-
-    try:
-        with engine.begin() as conn:
-            result = conn.execute(sql, unique_batch)
-            inserted = result.rowcount
-            if inserted > 0:
-                rows_inserted.inc(inserted)
-            logger.info(f"⚡ Committed batch: {inserted} unique rows.")
-            return inserted
-    except Exception as e:
-        logger.error(f"Batch Insert Failed: {e}")
-        return 0
+    # Retry logic for transient DB errors (deadlocks, connection resets)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with engine.begin() as conn:
+                result = conn.execute(sql, batch)
+                inserted = result.rowcount
+                if inserted > 0:
+                    rows_inserted.inc(inserted)
+                logger.info(f"Committed batch: {inserted} rows.")
+                return inserted
+        except OperationalError as e:
+            err_msg = str(e)
+            # Retry on deadlock or connection errors
+            if attempt < max_retries - 1 and ('Deadlock' in err_msg or '2006' in err_msg or '2013' in err_msg or 'Lost connection' in err_msg):
+                wait = (attempt + 1) * 2
+                logger.warning(f"DB transient error (attempt {attempt+1}/{max_retries}), retrying in {wait}s: {err_msg[:100]}")
+                time.sleep(wait)
+                continue
+            # Non-retryable OperationalError
+            if "[parameters:" in err_msg:
+                err_msg = err_msg.split("[parameters:")[0] + " [Parameters hidden]"
+            logger.error(f"Batch Insert Failed after retries: {err_msg.strip()}")
+            return 0
+        except Exception as e:
+            msg = str(e)
+            if "[parameters:" in msg:
+                msg = msg.split("[parameters:")[0] + " [Parameters hidden for brevity]"
+            logger.error(f"Batch Insert Failed: {msg.strip()}")
+            return 0
+    return 0
 
 
 def update_file_checkpoint(file_id, filename, status, row_number=0, error_msg=None, file_hash=None):
@@ -271,11 +234,11 @@ def update_file_checkpoint(file_id, filename, status, row_number=0, error_msg=No
                 "filename": filename,
                 "status": status,
                 "row_num": row_number,
-                "error_msg": error_msg,
+                "error_msg": str(error_msg)[:2000] if error_msg else None,
                 "file_hash": file_hash
             })
     except Exception as e:
-        logger.error(f"Checkpoint update failed for {filename}: {e}")
+        logger.warning(f"Checkpoint update failed for {filename}: {e}")
 
 def get_file_checkpoint(file_id):
     """Retrieves the last processed row for a file."""
@@ -308,7 +271,7 @@ def send_to_dlq(file_id, file_name, error, task_id, retry_count=0):
         dlq_entries.inc()  # Fix 9: Metrics
         logger.warning(f"[DLQ] Task routed to Dead Letter Queue: {file_name} (retries: {retry_count})")
     except Exception as e:
-        logger.error(f"[DLQ] Failed to write to DLQ for {file_name}: {e}")
+        logger.warning(f"[DLQ] Failed to write to DLQ for {file_name}: {e}")
 
 
 # SECTION 6: Dashboard Stats Refresh — Zero Downtime
@@ -333,8 +296,6 @@ def refresh_dashboard_stats():
             """), {"total": res[0], "states": res[1], "cats": res[2], "csvs": res[3]})
 
             # 2. UPSERT State-Category Summary
-            # Using READ UNCOMMITTED to prevent this heavy COUNT from placing shared locks
-            # on the raw_google_map_drive_data table, blocking incoming Celery batch inserts.
             conn.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"))
             conn.execute(text("""
                 INSERT INTO state_category_summary_v5 (state, category, record_count)
@@ -348,18 +309,24 @@ def refresh_dashboard_stats():
             
         logger.info("Dashboard stats refreshed successfully without locking tables.")
     except Exception as e:
-        logger.error(f"Stats Refresh Failed: {e}")
+        logger.warning(f"Stats Refresh Failed (non-fatal): {e}")
 
 def trigger_stats_refresh():
-    """Call this inside process_csv_task on success."""
+    """Call this inside process_csv_task on success. Fully guarded — never throws."""
     try:
-        r = redis.from_url(os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"))
+        import redis as redis_lib
+        r = redis_lib.from_url(
+            os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+            socket_timeout=3,
+            socket_connect_timeout=3,
+            retry_on_timeout=True
+        )
         val = r.incr("gdrive_etl_file_count")
         if val % 50 == 0:
             refresh_dashboard_stats.delay()
-            logger.debug(f"Triggering stats refresh (Counter: {val})")
-    except Exception as e:
-        logger.warning(f"Failed to check stats trigger: {e}")
+    except Exception:
+        # Redis down is non-fatal — just skip stats trigger silently
+        pass
 
 
 # SECTION 4: Main Processing Task (with all fixes applied)
@@ -376,12 +343,19 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
     global shutdown_requested
     start_time = time.time()
     task_id = self.request.id
-    file_hash = get_file_hash(file_id, modified_time)
+    
+    # Normalize datetime ONCE — handles all ISO formats safely
+    if modified_time:
+        modified_time = str(modified_time).strip()
+        if 'T' in modified_time:
+            modified_time = modified_time.replace('T', ' ').replace('Z', '').split('.')[0]
+        
+    file_hash = get_file_hash(file_id, modified_time or '')
     
     # 1. Check for existing checkpoint (Idempotency Phase 3)
     status, last_row = get_file_checkpoint(file_id)
     if status == 'PROCESSED':
-        logger.info(f"⏭ Skip: {file_name} already fully processed.")
+        logger.info(f"Skip: {file_name} already fully processed.")
         return f"Skipped processed file: {file_name}"
     
     try:
@@ -392,7 +366,7 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
             reader = csv.DictReader(stream)
             current_row_idx = 0
             batch = []
-            BATCH_THRESHOLD = 2000 # High-speed: 4x fewer DB round-trips
+            BATCH_THRESHOLD = 3000 # Memory-friendly limit
             
             for row in reader:
                 current_row_idx += 1
@@ -408,14 +382,18 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
                                           error_msg="Graceful shutdown")
                     return f"Paused: {file_name} at row {current_row_idx-1}"
                 
-                # Normalize
-                norm_row = UniversalNormalizer.normalize_row({
-                    **row, "drive_file_id": file_id, "drive_file_name": file_name,
-                    "drive_folder_id": folder_id, "drive_folder_name": folder_name,
-                    "drive_file_path": path, "drive_uploaded_time": modified_time
-                })
-                norm_row['file_hash'] = file_hash
-                batch.append(norm_row)
+                # Normalize — wrapped in try/except to skip bad rows instead of crashing
+                try:
+                    norm_row = UniversalNormalizer.normalize_row_raw({
+                        **row, "drive_file_id": file_id, "drive_file_name": file_name,
+                        "drive_folder_id": folder_id, "drive_folder_name": folder_name,
+                        "drive_file_path": path, "drive_uploaded_time": modified_time
+                    })
+                    norm_row['file_hash'] = file_hash
+                    batch.append(norm_row)
+                except Exception as norm_err:
+                    logger.warning(f"Row {current_row_idx} normalization failed in {file_name}: {norm_err}")
+                    continue
                 
                 # BATCH INSERT (High Speed)
                 if len(batch) >= BATCH_THRESHOLD:
@@ -436,8 +414,14 @@ def process_csv_task(self, file_id, file_name, folder_id, folder_name, path, mod
         return f"Completed {file_name}: {current_row_idx} rows"
 
     except Exception as e:
-        logger.error(f"[CRASH] {file_name}: {e}")
-        update_file_checkpoint(file_id, file_name, 'ERROR', last_row, error_msg=str(e), file_hash=file_hash)
+        err_msg = str(e)
+        # Truncate noisy SQL parameter dumps
+        if "[parameters:" in err_msg:
+            err_msg = err_msg.split("[parameters:")[0].strip()
+        logger.error(f"[CRASH] {file_name}: {err_msg[:300]}")
+        update_file_checkpoint(file_id, file_name, 'ERROR', last_row, error_msg=err_msg[:2000], file_hash=file_hash)
         if self.request.retries >= self.max_retries:
-            send_to_dlq(file_id, file_name, str(e), task_id, self.request.retries)
+            send_to_dlq(file_id, file_name, err_msg[:2000], task_id, self.request.retries)
+            # Don't raise — file is in DLQ, no more retries
+            return f"DLQ: {file_name} after {self.request.retries} retries"
         raise self.retry(exc=e)

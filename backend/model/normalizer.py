@@ -133,6 +133,34 @@ class UniversalNormalizer:
         return val
 
     @staticmethod
+    def normalize_int(val):
+        """Robust integer normalization. Prevents DB errors on empty strings."""
+        if val is None: return 0
+        val_str = str(val).strip().lower()
+        if val_str in ('', 'nan', 'none', 'nat'): return 0
+        match = re.search(r'\d+', val_str)
+        return int(match.group()) if match else 0
+
+    @staticmethod
+    def normalize_float(val):
+        """Robust float normalization. Prevents DB errors on empty strings."""
+        if val is None: return 0.0
+        val_str = str(val).strip().lower()
+        if val_str in ('', 'nan', 'none', 'nat'): return 0.0
+        match = re.search(r'[-+]?\d*\.?\d+', val_str)
+        return float(match.group()) if match else 0.0
+
+    @staticmethod
+    def normalize_date(val):
+        """Standardize ISO 8601 dates for MySQL DATETIME."""
+        if not val: return None
+        val_str = str(val).strip()
+        if 'T' in val_str:
+            # Convert 2024-02-26T10:00:00.000Z -> 2024-02-26 10:00:00
+            val_str = val_str.replace('T', ' ').replace('Z', '').split('.')[0]
+        return val_str
+
+    @staticmethod
     def get_fuzzy(row, canonical_key):
         """🔍 Smart header mapping for multilingual CSVs."""
         # Common variations for Indian data headers
@@ -164,15 +192,38 @@ class UniversalNormalizer:
         return row.get(canonical_key)
 
     @classmethod
-    def normalize_row(cls, row):
-        """Normalize a single data row. Preserves ALL text in ALL languages."""
+    def normalize_row_raw(cls, row):
+        """Tier 1: Minimal normalization for raw storage. Only trims whitespace."""
+        return {
+            "name": cls.get_fuzzy(row, "name"),
+            "address": cls.get_fuzzy(row, "address"),
+            "website": cls.get_fuzzy(row, "website"),
+            "phone_number": cls.get_fuzzy(row, "phone_number"),
+            "reviews_count": cls.normalize_int(cls.get_fuzzy(row, "reviews_count")),
+            "reviews_average": cls.normalize_float(cls.get_fuzzy(row, "reviews_average")),
+            "category": cls.get_fuzzy(row, "category"),
+            "subcategory": cls.get_fuzzy(row, "subcategory"),
+            "city": cls.get_fuzzy(row, "city"),
+            "state": cls.get_fuzzy(row, "state"),
+            "area": row.get("area"),
+            "drive_folder_id": row.get("drive_folder_id"),
+            "drive_folder_name": row.get("drive_folder_name"),
+            "drive_file_id": row.get("drive_file_id"),
+            "drive_file_name": row.get("drive_file_name"),
+            "drive_file_path": row.get("drive_file_path"),
+            "drive_uploaded_time": cls.normalize_date(row.get("drive_uploaded_time")),
+        }
+
+    @classmethod
+    def normalize_row_full(cls, row):
+        """Tier 2: Robust normalization for clean/master storage."""
         return {
             "name": cls.clean_text(cls.get_fuzzy(row, "name")),
             "address": cls.clean_text(cls.get_fuzzy(row, "address")),
             "website": cls.normalize_website(cls.get_fuzzy(row, "website")),
             "phone_number": cls.normalize_phone(cls.get_fuzzy(row, "phone_number")),
-            "reviews_count": cls.get_fuzzy(row, "reviews_count"),
-            "reviews_average": cls.get_fuzzy(row, "reviews_average"),
+            "reviews_count": cls.normalize_int(cls.get_fuzzy(row, "reviews_count")),
+            "reviews_average": cls.normalize_float(cls.get_fuzzy(row, "reviews_average")),
             "category": cls.normalize_category(cls.get_fuzzy(row, "category")),
             "subcategory": cls.clean_text(cls.get_fuzzy(row, "subcategory")),
             "city": cls.clean_text(cls.get_fuzzy(row, "city")),
@@ -183,5 +234,5 @@ class UniversalNormalizer:
             "drive_file_id": row.get("drive_file_id"),
             "drive_file_name": row.get("drive_file_name"),
             "drive_file_path": row.get("drive_file_path"),
-            "drive_uploaded_time": row.get("drive_uploaded_time"),
+            "drive_uploaded_time": cls.normalize_date(row.get("drive_uploaded_time")),
         }
