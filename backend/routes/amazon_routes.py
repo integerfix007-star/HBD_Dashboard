@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 import threading
 from extensions import db
-from model.amazon_product_model import AmazonProduct
+from model.product_model.amazon_product import AmazonProduct
 from services.scrapers.amazon_service import scrape_amazon_search
 
 amazon_api_bp = Blueprint('amazon_api_bp', __name__)

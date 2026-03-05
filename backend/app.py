@@ -28,28 +28,42 @@ from extensions import db, jwt, cors, mail, migrate
 # --- Import Models ---
 from model.user import User
 from model.scraper_task import ScraperTask
-from model.amazon_product_model import AmazonProduct
-from model.googlemap_data import GoogleMapData # Correct Import
+
+from model.googlemap_data import GoogleMapData
 from model.item_csv_model import ItemData
 from model.master_table_model import MasterTable
 from model.upload_master_reports_model import UploadReport
 from model.listing_master import ListingMaster
 from model.heyplaces import HeyPlaces
+from model.location_master import LocationMaster
+
 # Existing Models
 from model.asklaila import Asklaila
 from model.atm import ATM
 from model.bank import Bank
 from model.college_dunia import CollegeDunia
+from model.justdial import JustDial
+from model.magicpin import MagicPin
+from model.nearbuy import NearBuy
+from model.pinda import Pinda
+from model.post_office import PostOffice
+from model.schoolgis import SchoolGIS
+from model.shiksha import Shiksha
+from model.yellow_pages import YellowPages
+from model.google_map_scrape import GoogleMapScrape
+
+# --- Product Routes ---
+from model.product_model.amazon_product import AmazonProduct
+from model.product_model.bigbasket_product_model import BigBasket
 
 # --- Import Blueprints ---
 from routes.auth_route import auth_bp
 from routes.scraper_routes import scraper_bp
 from routes.amazon_routes import amazon_api_bp
-from routes.googlemap import googlemap_bp # Correct Import
+from routes.googlemap import googlemap_bp
 from routes.master_table import master_table_bp
 from routes.upload_product_csv import product_csv_bp
 from routes.upload_item_csv import item_csv_bp
-from routes.amazon_product import amazon_products_bp
 
 # Listing & Product Blueprints imports
 from routes.items_data import item_bp
@@ -57,6 +71,8 @@ from routes.item_csv_download import item_csv_bp as item_csv_download_bp
 from routes.item_duplicate import item_duplicate_bp
 from routes.upload_others_csv import upload_others_csv_bp
 from routes.listing_master_route import listing_master_bp
+
+from routes.location_master_route import location_master_bp
 
 from routes.listing_routes.upload_asklaila_route import asklaila_bp
 from routes.listing_routes.upload_atm_route import atm_bp
@@ -85,8 +101,6 @@ from routes.product_routes.upload_jio_mart_route import jiomart_bp
 from routes.gdrive_etl_routes.validation_dashboard import validation_dashboard_bp
 from routes.gdrive_etl_routes.dashboard_stats import dashboard_bp
 
-import sys
-import signal
 # --- Initialize App ---
 load_dotenv()
 app = Flask(__name__)
@@ -96,7 +110,7 @@ app.config.from_object(Config)
 db.init_app(app)
 migrate.init_app(app, db)
 jwt.init_app(app)
-cors.init_app(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True) # Allow all origins for dev
+cors.init_app(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 mail.init_app(app)
 
 with app.app_context():
@@ -125,6 +139,7 @@ PUBLIC_ROUTES = [
     "/api/nearbuy/fetch-data",
     "/api/justdial/fetch-data",
     "/api/heyplaces/fetch-data",
+    "/api/location-master/fetch-data",
     # Validation dashboard
     "/api/validation/dashboard",
     "/api/validation/errors",
@@ -145,14 +160,16 @@ def protect_all_routes():
         
     normalized_path = request.path.rstrip('/')
     normalized_public_routes = [route.rstrip('/') for route in PUBLIC_ROUTES]
-    
+
     if normalized_path in normalized_public_routes or request.path in PUBLIC_ROUTES:
         return None
-    
+
+    if normalized_path.endswith('/fetch-data'):
+        return None
     try:
         verify_jwt_in_request()
     except Exception as e:
-        print(f"❌ JWT REJECTED for {request.path}: {str(e)}") 
+        print(f"❌ JWT REJECTED for {request.path}: {str(e)}")
         return jsonify({"message": "Missing or invalid token", "error": str(e)}), 401
 
 # --- Register Main Blueprints ---
@@ -161,12 +178,12 @@ app.register_blueprint(scraper_bp, url_prefix="/api")
 app.register_blueprint(amazon_api_bp, url_prefix="/api")
 
 # CORRECT REGISTRATION FOR GOOGLE MAPS
-app.register_blueprint(googlemap_bp, url_prefix='/api') 
+app.register_blueprint(googlemap_bp, url_prefix='/api')
 
 app.register_blueprint(master_table_bp)
 app.register_blueprint(product_csv_bp)
 app.register_blueprint(item_csv_bp)
-app.register_blueprint(amazon_products_bp)
+
 app.register_blueprint(item_bp, url_prefix="/items")
 app.register_blueprint(item_csv_download_bp)
 app.register_blueprint(item_duplicate_bp)
@@ -185,7 +202,8 @@ blueprints_listing = [
     (schoolgis_bp, "/schoolgis"), (shiksha_bp, "/shiksha"), (yellow_pages_bp, "/yellow-pages"),
     (amazon_upload_bp, "/amazon"), (vivo_bp, "/vivo"), (blinkit_bp, "/blinkit"),
     (dmart_bp, "/dmart"), (flipkart_bp, "/flipkart"), (indiamart_bp, "/india-mart"),
-    (jiomart_bp, "/jio-mart"), (bigbasket_bp, "/big-basket")
+    (jiomart_bp, "/jio-mart"), (bigbasket_bp, "/big-basket"),
+    (location_master_bp, "/location-master") # ✅ ADDED Location Master Blueprint
 ]
 
 for bp, prefix in blueprints_listing:

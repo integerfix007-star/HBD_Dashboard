@@ -1,7 +1,3 @@
-<<<<<<< Updated upstream
-import React, { useState, useEffect } from 'react';
-import ReusableTable from '../Table/ReusableTable';
-=======
 import React, { useEffect, useState, useCallback } from "react";
 import api from "@/utils/Api";
 import {
@@ -16,23 +12,20 @@ import {
 import {
   ChevronUpDownIcon,
   ArrowPathIcon,
-  ArrowDownTrayIcon,
-  LinkIcon
+  ArrowDownTrayIcon
 } from "@heroicons/react/24/solid";
 import * as XLSX from "xlsx/dist/xlsx.full.min.js";
 
-const amazonColumns = [
-  { key: "asin", label: "ASIN", width: "w-1/12" },
-  { key: "name", label: "Product Name", width: "w-4/12" },
-  { key: "brand", label: "Brand", width: "w-2/12" },
+const gmsColumns = [
+  { key: "name", label: "Business Name", width: "w-3/12" },
   { key: "category", label: "Category", width: "w-2/12" },
-  { key: "price", label: "Price", width: "w-1/12" },
+  { key: "address", label: "Address", width: "w-4/12" },
+  { key: "number", label: "Contact No", width: "w-1/12" },
   { key: "rating", label: "Rating", width: "w-1/12" },
-  { key: "link", label: "URL", width: "w-1/12" },
+  { key: "review_count", label: "Reviews", width: "w-1/12" },
 ];
->>>>>>> Stashed changes
 
-const AmazonData = () => {
+const GoogleMapData = () => {
   const [loading, setLoading] = useState(true);
   const [pageData, setPageData] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -41,90 +34,15 @@ const AmazonData = () => {
   const [error, setError] = useState(null);
   const limit = 10;
 
-<<<<<<< Updated upstream
-  // 1. CONFIGURATION: Define how to show the data
-  const amazonColumns = [
-    {
-      header: "Image",
-      accessor: "img",
-      render: (row) => (
-        <img
-          src={row.img}
-          alt="product"
-          style={{ width: "50px", height: "50px", objectFit: "contain" }}
-        />
-      )
-    },
-    {
-      header: "Product Name",
-      accessor: "name",
-      render: (row) => (
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <span style={{ fontWeight: 'bold' }}>{row.name}</span>
-          <span style={{ fontSize: '12px', color: '#666' }}>ID: {row.id}</span>
-        </div>
-      )
-    },
-    {
-      header: "Price",
-      accessor: "price",
-      render: (row) => (
-        <span style={{ fontWeight: 'bold' }}>₹{row.price}</span>
-      )
-    },
-    {
-      header: "Rating",
-      accessor: "rating",
-      render: (row) => <span>{row.rating} ⭐</span>
-    },
-    {
-      header: "Action",
-      accessor: "action",
-      render: (row) => (
-        <button
-          style={{ padding: '5px 10px', cursor: 'pointer' }}
-          onClick={() => alert(`View details for ${row.name}`)}
-        >
-          View
-        </button>
-      )
-    }
-  ];
-
-  // 2. FETCHING: Get data from Flask
-  useEffect(() => {
-    // Replace this URL with your actual Flask API endpoint
-    fetch('http://localhost:8001/api/amazon-products')
-      .then((response) => response.json())
-      .then((data) => {
-        setProducts(data);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error fetching data:", error);
-        setLoading(false);
-      });
-  }, []);
-
-  return (
-    <div style={{ padding: '20px' }}>
-      <h2>Amazon Product Master</h2>
-      {loading ? (
-        <p>Loading data...</p>
-      ) : (
-        <ReusableTable columns={amazonColumns} data={products} />
-      )}
-=======
   const [search, setSearch] = useState("");
-  const [categorySearch, setCategorySearch] = useState("");
+  const [citySearch, setCitySearch] = useState("");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Pointing to the specific Amazon route
-      const response = await api.get("/amazon/fetch-data", {
-        params: { page: currentPage, limit, search, category: categorySearch }
+      const response = await api.get("/google-map-scrape/fetch-data", {
+        params: { page: currentPage, limit, search, city: citySearch }
       });
       
       const result = response.data;
@@ -133,11 +51,11 @@ const AmazonData = () => {
       setTotalRecords(result.total_count || 0);
     } catch (err) {
       console.error("Fetch Error:", err);
-      setError("Failed to fetch Amazon data.");
+      setError("Failed to fetch Google Map Scrape data.");
     } finally {
       setLoading(false);
     }
-  }, [currentPage, search, categorySearch]);
+  }, [currentPage, search, citySearch]);
 
   useEffect(() => {
     fetchData();
@@ -147,8 +65,8 @@ const AmazonData = () => {
     if (!pageData.length) return;
     const ws = XLSX.utils.json_to_sheet(pageData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Amazon_Data");
-    XLSX.writeFile(wb, `Amazon_Products_Page_${currentPage}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "GoogleMapScrape_Data");
+    XLSX.writeFile(wb, `GoogleMapScrape_Page_${currentPage}.xlsx`);
   };
 
   return (
@@ -156,19 +74,19 @@ const AmazonData = () => {
       <div className="flex justify-between items-end mb-6">
         <div>
           <Typography variant="h4" className="font-bold text-blue-gray-900">
-            Amazon Product Master
+            Google Map Scrape Master
           </Typography>
           <Typography variant="small" className="font-medium text-gray-500">
             {error ? (
               <span className="text-red-500 font-bold">{error}</span>
             ) : (
-              `Displaying scraped products (${totalRecords} total)`
+              `Displaying scraped records (${totalRecords} total)`
             )}
           </Typography>
         </div>
         <div className="flex gap-2">
           <Button variant="gradient" color="green" size="sm" className="flex items-center gap-2" onClick={exportToExcel}>
-            <ArrowDownTrayIcon className="h-4 w-4" /> Export
+            <ArrowDownTrayIcon className="h-4 w-4" /> Export Page
           </Button>
           <Button variant="outlined" size="sm" className="flex items-center gap-2" onClick={fetchData}>
             <ArrowPathIcon className="h-4 w-4" /> Refresh
@@ -181,11 +99,10 @@ const AmazonData = () => {
           <div className="flex flex-wrap items-center justify-between gap-y-4">
             <div className="flex w-full shrink-0 gap-2 md:w-max">
               <div className="w-72">
-                <Input label="Search Product Name" value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }} />
+                <Input label="Search Business Name" value={search} onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }} />
               </div>
               <div className="w-48">
-                {/* Changed from City to Category */}
-                <Input label="Filter by Category" value={categorySearch} onChange={(e) => { setCategorySearch(e.target.value); setCurrentPage(1); }} />
+                <Input label="Filter by City/Address" value={citySearch} onChange={(e) => { setCitySearch(e.target.value); setCurrentPage(1); }} />
               </div>
             </div>
             
@@ -214,8 +131,8 @@ const AmazonData = () => {
             <table className="w-full min-w-max table-auto text-left">
               <thead>
                 <tr>
-                  {amazonColumns.map((col) => (
-                    <th key={col.key} className={`${col.width} border-y border-blue-gray-100 bg-blue-gray-50/50 p-4 transition-colors`}>
+                  {gmsColumns.map((col) => (
+                    <th key={col.key} className="border-y border-blue-gray-100 bg-blue-gray-50/50 p-4 transition-colors">
                       <Typography variant="small" color="blue-gray" className="flex items-center justify-between gap-2 font-bold leading-none opacity-70">
                         {col.label} <ChevronUpDownIcon strokeWidth={2} className="h-4 w-4" />
                       </Typography>
@@ -227,16 +144,10 @@ const AmazonData = () => {
                 {pageData.length > 0 ? (
                   pageData.map((row, index) => (
                     <tr key={index} className="even:bg-blue-gray-50/50 hover:bg-blue-50 transition-colors">
-                      {amazonColumns.map((col) => (
+                      {gmsColumns.map((col) => (
                         <td key={col.key} className="p-4 border-b border-blue-gray-50">
-                          <Typography variant="small" color="blue-gray" className="font-normal truncate max-w-[300px]">
-                            {col.key === 'link' && row[col.key] ? (
-                              <a href={row[col.key]} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-700">
-                                <LinkIcon className="h-4 w-4" />
-                              </a>
-                            ) : (
-                              row[col.key] || "-"
-                            )}
+                          <Typography variant="small" color="blue-gray" className="font-normal break-words">
+                            {row[col.key] || "-"}
                           </Typography>
                         </td>
                       ))}
@@ -244,9 +155,9 @@ const AmazonData = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={amazonColumns.length} className="p-20 text-center">
+                    <td colSpan={gmsColumns.length} className="p-20 text-center">
                       <Typography variant="h6" color="blue-gray" className="opacity-40 italic">
-                        {error || "No products found"}
+                        {error || "No records found"}
                       </Typography>
                     </td>
                   </tr>
@@ -256,9 +167,8 @@ const AmazonData = () => {
           )}
         </CardBody>
       </Card>
->>>>>>> Stashed changes
     </div>
   );
 };
 
-export default AmazonData;
+export default GoogleMapData;
