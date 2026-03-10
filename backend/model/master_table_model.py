@@ -26,7 +26,6 @@ class MasterTable(db.Model):
     whatsapp_phone = Column(String(50), nullable=True)
     website_url = Column(String(500), nullable=True)
     isBestSeller = Column(String(20), nullable=True)
-    #boughtInLastMonth = Column('boughtinLastMonth', String(50), nullable=True)
     ImgUrl = Column(Text, nullable=True)
     facebook_url = Column(String(255), nullable=True)
     linkedin_url = Column(String(255), nullable=True)
@@ -55,6 +54,7 @@ class MasterTable(db.Model):
     created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
 
     def to_dict(self):
+        # Dynamically grabs all columns so you don't have to map 40+ fields manually
         data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
         if self.created_at:
             data['created_at'] = self.created_at.isoformat()
