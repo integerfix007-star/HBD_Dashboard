@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import api from "@/utils/Api";
+import api from "@/configs/api";
 import {
   Button,
   Card,

@@ -1,13 +1,17 @@
 import os
+import json
 from pathlib import Path
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, make_response
 from sqlalchemy import func, or_, text
 from werkzeug.utils import secure_filename
+from datetime import datetime
+import hashlib
 
 # Model and Session imports
 from model.master_table_model import MasterTable
 from model.upload_master_reports_model import UploadReport
 from database.session import get_db_session
+from extensions import redis_client
 
 # --- INITIALIZE BLUEPRINT FIRST ---
 master_table_bp = Blueprint("master_table", __name__)
@@ -21,6 +25,46 @@ try:
     from tasks.upload_master_task import process_master_upload_task
 except ImportError:
     process_master_upload_task = None
+
+# Cache constants
+CACHE_TTL = 300  # 5 minutes
+
+def _get_cache_key(task_id=None):
+    """Generate cache key based on task_id"""
+    return f"dashboard_stats_{task_id or 'all'}"
+
+def _get_cached_data(cache_key):
+    """Get data from Redis cache"""
+    if not redis_client:
+        return None
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        print(f"⚠ Redis get error: {e}")
+    return None
+
+def _set_cached_data(cache_key, data, etag):
+    """Store data in Redis cache with TTL"""
+    if not redis_client:
+        return
+    try:
+        cache_data = {
+            "data": data,
+            "etag": etag,
+            "cached_at": datetime.utcnow().isoformat()
+        }
+        redis_client.setex(cache_key, CACHE_TTL, json.dumps(cache_data))
+    except Exception as e:
+        print(f"⚠ Redis set error: {e}")
+
+def _set_cache_headers(response, etag):
+    """Set proper HTTP caching headers"""
+    response.headers['Cache-Control'] = f'public, max-age={CACHE_TTL}'
+    response.headers['ETag'] = etag
+    response.headers['X-Cache-Source'] = 'Redis' if redis_client else 'Memory'
+    return response
 
 # --- ROUTES ---
 
@@ -91,9 +135,30 @@ def get_master_table_list():
 
 @master_table_bp.route("/master-dashboard-stats", methods=["GET"])
 def get_master_dashboard_stats():
-    session = get_db_session()
     task_id = request.args.get('task_id')
+    cache_key = _get_cache_key(task_id)
     
+    # Check if-none-match header for client-side caching
+    if_none_match = request.headers.get('If-None-Match')
+    
+    # Check Redis cache first
+    cached_entry = _get_cached_data(cache_key)
+    if cached_entry:
+        cached_data = cached_entry.get("data")
+        cached_etag = cached_entry.get("etag")
+        
+        if if_none_match == cached_etag:
+            return make_response('', 304)  # Not Modified
+        
+        result = {
+            "status": "COMPLETED",
+            "stats": cached_data,
+            "source": "Redis Cache"
+        }
+        response = make_response(jsonify(result))
+        return _set_cache_headers(response, cached_etag)
+    
+    session = get_db_session()
     where_clause = "WHERE 1=1"
     params = {}
     if task_id:
@@ -101,33 +166,28 @@ def get_master_dashboard_stats():
         params['task_id'] = task_id
 
     try:
-        # Optimization 1: Get Total Count and Avg Rating in ONE query instead of two
+        # Optimization 1: Combined meta + phone distribution in one query
         meta_query = text(f"""
-            SELECT COUNT(*) as total, ROUND(AVG(ratings), 1) as avg_r 
+            SELECT 
+                COUNT(*) as total,
+                ROUND(AVG(ratings), 1) as avg_r,
+                SUM(CASE WHEN COALESCE(primary_phone, secondary_phone, other_phones, virtual_phone, whatsapp_phone, '') != '' THEN 1 ELSE 0 END) as has_phone
             FROM master_table {where_clause}
         """)
         meta_res = session.execute(meta_query, params).fetchone()
         total_records = meta_res.total or 0
         avg_rating = float(meta_res.avg_r or 0.0)
-
-        # Optimization 2: Phone Distribution (Fast boolean check)
-        phone_query = text(f"""
-            SELECT 
-                SUM(CASE WHEN COALESCE(primary_phone, secondary_phone, other_phones, virtual_phone, whatsapp_phone, '') != '' THEN 1 ELSE 0 END) as has_phone
-            FROM master_table {where_clause}
-        """)
-        has_phone = session.execute(phone_query, params).scalar() or 0
+        has_phone = meta_res.has_phone or 0
         missing_phone = total_records - has_phone
 
-        # Optimization 3: Limit the "Top" queries even further to save processing time
-        # We only take top 5 for the heavy group-bys
+        # Optimization 2: Separate queries for different stats
         state_query = text(f"SELECT state, COUNT(*) as count FROM master_table {where_clause} AND state != '' GROUP BY state ORDER BY count DESC LIMIT 5")
         states = [dict(row._mapping) for row in session.execute(state_query, params)]
 
         city_query = text(f"SELECT city as name, COUNT(*) as count FROM master_table {where_clause} AND city != '' GROUP BY city ORDER BY count DESC LIMIT 5")
         top_cities = [dict(row._mapping) for row in session.execute(city_query, params)]
         
-        sub_query = text(f"SELECT business_category as name, COUNT(*) as count FROM master_table {where_clause} GROUP BY name ORDER BY count DESC LIMIT 5")
+        sub_query = text(f"SELECT business_category as name, COUNT(*) as count FROM master_table {where_clause} GROUP BY business_category ORDER BY count DESC LIMIT 5")
         top_subs = [dict(row._mapping) for row in session.execute(sub_query, params)]
 
         top_rated_query = text(f"""
@@ -138,22 +198,38 @@ def get_master_dashboard_stats():
         """)
         top_rated = [dict(row._mapping) for row in session.execute(top_rated_query, params)]
 
-        return jsonify({
+        stats_data = {
+            "total_records": total_records,
+            "avg_system_rating": avg_rating,
+            "state_summary": states,
+            "phone_distribution": [
+                {"name": "With Contact No.", "value": int(has_phone), "fill": "#10b981"},
+                {"name": "No Contact No.", "value": int(missing_phone), "fill": "#ef4444"}
+            ],
+            "top_cities": top_cities,
+            "top_subcategories": top_subs,
+            "top_rated_businesses": top_rated,
+            "cached_at": datetime.utcnow().isoformat()
+        }
+        
+        # Generate ETag
+        stats_json = str(stats_data).encode()
+        etag = hashlib.md5(stats_json).hexdigest()
+        
+        # Store in Redis cache
+        _set_cached_data(cache_key, stats_data, etag)
+        
+        result = {
             "status": "COMPLETED",
-            "stats": {
-                "total_records": total_records,
-                "avg_system_rating": avg_rating,
-                "state_summary": states,
-                "phone_distribution": [
-                    {"name": "With Contact No.", "value": int(has_phone), "fill": "#10b981"},
-                    {"name": "No Contact No.", "value": int(missing_phone), "fill": "#ef4444"}
-                ],
-                "top_cities": top_cities,
-                "top_subcategories": top_subs,
-                "top_rated_businesses": top_rated
-            }
-        })
+            "stats": stats_data,
+            "source": "Database Query"
+        }
+        
+        response = make_response(jsonify(result))
+        return _set_cache_headers(response, etag)
+        
     except Exception as e:
+        print(f"❌ Dashboard stats error: {e}")
         return jsonify({"status": "ERROR", "message": str(e)}), 500
     finally:
         session.close()

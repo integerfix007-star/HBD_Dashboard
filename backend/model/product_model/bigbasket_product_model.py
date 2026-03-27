@@ -1,6 +1,6 @@
 from extensions import db
 
-class BigBasket(db.Model):
+class BigBasketProduct(db.Model):
     __tablename__ = 'big_basket' # Assuming this is your exact MySQL table name
 
     id = db.Column(db.Integer, primary_key=True)

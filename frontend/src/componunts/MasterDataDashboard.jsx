@@ -18,23 +18,88 @@ const MasterDataDashboard = () => {
   const taskId = searchParams.get("task_id");
   const [dashboardData, setDashboardData] = useState(null);
   const [error, setError] = useState(null);
+  const [cacheAge, setCacheAge] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [etag, setEtag] = useState(null);
+
+  // Cache constants
+  const CACHE_KEY = `dashboard_stats_${taskId || "all"}`;
+  const CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+  // Get cached data if valid
+  const getCachedData = () => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (!cached) return null;
+      
+      const { data, timestamp, etag: cachedEtag } = JSON.parse(cached);
+      const age = Date.now() - timestamp;
+      
+      if (age < CACHE_TTL) {
+        return { data, age, etag: cachedEtag };
+      }
+      return null; // Cache expired
+    } catch (err) {
+      console.warn("Cache read error:", err);
+      return null;
+    }
+  };
+
+  // Save data to cache
+  const setCachedData = (data, etagValue) => {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        data,
+        timestamp: Date.now(),
+        etag: etagValue
+      }));
+    } catch (err) {
+      console.warn("Cache write error:", err);
+    }
+  };
 
   useEffect(() => {
+    const controller = new AbortController();
+    let isMounted = true;
+
     const fetchData = async () => {
       try {
+        // 1. Try to get cached data first
+        const cached = getCachedData();
+        if (cached && cached.data) {
+          if (isMounted) {
+            setDashboardData(cached.data);
+            setCacheAge(Math.floor(cached.age / 1000));
+            setEtag(cached.etag);
+            setError(null);
+          }
+        }
+
         const query = taskId ? `?task_id=${taskId}` : "";
-        
-        // 1. Force the /api prefix to ensure Nginx routes it to Flask
         const url = `/api/master-dashboard-stats${query}`;
 
+        const headers = {
+          "Authorization": `Bearer ${localStorage.getItem("token") || ""}`,
+          "Content-Type": "application/json",
+          ...(cached?.etag && { "If-None-Match": cached.etag })
+        };
+
         const response = await fetch(url, {
-          headers: { 
-            "Authorization": `Bearer ${localStorage.getItem("token") || ""}`,
-            "Content-Type": "application/json" 
-          }
+          headers,
+          signal: controller.signal
         });
 
-        // 2. Check if the response is actually JSON before parsing to avoid the '<' error
+        // 2. Handle 304 Not Modified
+        if (response.status === 304) {
+          if (isMounted) {
+            setCacheAge(Math.floor((Date.now() - (localStorage.getItem(CACHE_KEY) 
+              ? JSON.parse(localStorage.getItem(CACHE_KEY)).timestamp 
+              : Date.now())) / 1000));
+          }
+          return;
+        }
+
+        // 3. Check if response is JSON
         const contentType = response.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
           throw new Error("Server returned HTML instead of JSON. The API route might be incorrect.");
@@ -45,31 +110,50 @@ const MasterDataDashboard = () => {
         }
 
         const result = await response.json();
+        const newEtag = response.headers.get("etag");
 
-        // 3. Accept any shape where stats exist
+        // 4. Extract stats and cache them
         if (result.stats) {
-          setDashboardData(result.stats);
-          setError(null);
-        } else if (result.status === "COMPLETED" && result.stats) {
-          setDashboardData(result.stats);
-          setError(null);
+          if (isMounted) {
+            setDashboardData(result.stats);
+            setCacheAge(0); // Fresh data
+            setCachedData(result.stats, newEtag);
+            setEtag(newEtag);
+            setError(null);
+          }
         } else {
           throw new Error(result.message || "Unexpected response from server");
         }
       } catch (err) {
+        if (err.name === "AbortError") return; // Request was cancelled
         console.error("Fetch error:", err);
-        setError(err.message || "Failed to load dashboard data.");
-        setDashboardData(null);
+        
+        if (isMounted) {
+          setError(err.message || "Failed to load dashboard data.");
+          // Keep showing cached data even on error
+          const cached = getCachedData();
+          if (!cached) {
+            setDashboardData(null);
+          }
+        }
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
     };
 
     fetchData();
-  }, [taskId]);
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [taskId, CACHE_KEY]);
 
   if (error) return (
     <div className="flex h-screen items-center justify-center bg-gray-50 flex-col px-4 text-center">
-      <div className="text-red-600 font-bold text-xl mb-3">Failed to load registry data</div>
-      <div className="text-sm text-gray-600 max-w-md">{error}</div>
+      <div className="text-red-600 font-bold text-xl mb-3">⚠️ Failed to load registry data</div>
+      <div className="text-sm text-gray-600 max-w-md mb-4">{error}</div>
+      {dashboardData && <div className="text-xs text-gray-500">Showing cached data</div>}
     </div>
   );
 
@@ -77,11 +161,42 @@ const MasterDataDashboard = () => {
     <div className="flex h-screen items-center justify-center bg-gray-50 flex-col">
       <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600 mb-6"></div>
       <h2 className="text-2xl font-bold text-gray-700">Loading Registry Data...</h2>
+      <p className="text-sm text-gray-500 mt-2">Fetching from cache or server</p>
     </div>
   );
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
+      {/* Cache Status Badge */}
+      {cacheAge !== null && (
+        <div className="mb-4 flex items-center justify-between bg-white px-4 py-2 rounded-lg text-xs text-gray-600 border border-gray-200">
+          <div className="flex items-center gap-2">
+            {cacheAge === 0 ? (
+              <>
+                <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                Fresh data (just now)
+              </>
+            ) : (
+              <>
+                <span className="inline-block w-2 h-2 bg-amber-500 rounded-full"></span>
+                Cached {cacheAge}s ago (auto-refresh in {Math.ceil((CACHE_TTL - cacheAge * 1000) / 1000)}s)
+              </>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              localStorage.removeItem(CACHE_KEY);
+              setDashboardData(null);
+              setCacheAge(null);
+              setIsLoading(true);
+              window.location.reload();
+            }}
+            className="text-blue-600 hover:text-blue-800 font-medium"
+          >
+            Refresh Now
+          </button>
+        </div>
+      )}
       {/* 1. KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="bg-white p-6 rounded-2xl shadow-sm border-t-4 border-blue-500">
