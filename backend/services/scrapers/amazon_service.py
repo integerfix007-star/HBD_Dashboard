@@ -11,7 +11,7 @@ from urllib.parse import unquote
 # --- App & DB Imports ---
 from extensions import db
 from model.scraper_task import ScraperTask
-from model.product_model.amazon_product import AmazonProduct
+from model.product_model.product_amazon_model import AmazonProduct
 
 # --- TEMPORARY: Keep this for amazon_routes.py compatibility if needed ---
 DB_CONFIG_AMAZON = {
