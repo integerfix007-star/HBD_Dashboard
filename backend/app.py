@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from config import Config
 from extensions import db, jwt, cors, mail, migrate, init_redis
 
-# --- Import Models ---
+# --- Import Models (Required for db.create_all() and migration tracking) ---
 from model.user import User
 from model.scraper_task import ScraperTask
 from model.googlemap_data import GoogleMapData 
@@ -36,9 +36,16 @@ from model.shiksha import Shiksha
 from model.yellow_pages import YellowPages
 from model.google_map_scrape import GoogleMapScrape
 
-# --- Product Models ---
-from model.product_model.amazon_product import AmazonProduct 
-from model.product_model.bigbasket_product_model import BigBasketProduct
+# --- Product Models (Required for db.create_all()) ---
+from model.product_model.product_amazon_model import AmazonProduct
+from model.product_model.product_bigbasket_model import BigBasketProduct
+from model.product_model.product_blinkit_model import BlinkitProduct
+from model.product_model.product_dmart_model import DMartProduct
+from model.product_model.product_flipkart_model import FlipkartProduct
+from model.product_model.product_indiamart_model import IndiaMartProduct
+from model.product_model.product_jiomart_model import JioMartProduct
+from model.product_model.product_zepto_model import ZeptoProduct
+from model.product_model.product_zomato_model import ZomatoProduct
 
 # --- Import Blueprints ---
 from routes.auth_route import auth_bp
@@ -136,12 +143,10 @@ if os.environ.get('WERKZEUG_RUN_MAIN') is None and __name__ != '__main__':
 # --- GLOBAL JWT PROTECTION ---
 PUBLIC_ROUTES = [
     "/",
-    "/auth/signup",
-    "/auth/login",
-    "/auth/logout",
-    "/auth/forgot-password",
-    "/auth/verify-otp",
-    "/auth/reset-password",
+    "/api/auth/signup",     # ✅ Simplified: email + password only
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/google-login",
     "/health",
     "/master_table/list",
     "/master-dashboard-stats",
@@ -197,9 +202,8 @@ def protect_all_routes():
         return jsonify({"message": "Missing or invalid token", "error": str(e)}), 401
 
 # --- Register Blueprints ---
-# As requested, we follow the working file's lead: no manual '/api' addition here 
-# if Nginx handles it.
-app.register_blueprint(auth_bp, url_prefix="/auth")
+# Auth routes go under /api/auth
+app.register_blueprint(auth_bp, url_prefix="/api/auth")
 app.register_blueprint(scraper_bp, url_prefix="/api")
 app.register_blueprint(googlemap_bp, url_prefix='/api')
 app.register_blueprint(master_table_bp)

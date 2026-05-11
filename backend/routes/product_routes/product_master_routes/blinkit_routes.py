@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 import threading
 from extensions import db
-from model.product_model.blinkit_product_model import BlinkitProduct
+from model.product_model.product_blinkit_model import BlinkitProduct
 from services.scrapers.amazon_service import scrape_amazon_search
 
 blinkit_api_bp = Blueprint('blinkit_api_bp', __name__)
@@ -37,36 +37,49 @@ def get_blinkit_data():
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
-        search = request.args.get('search', '', type=str)
-        category = request.args.get('category', '', type=str)
+        search = request.args.get('search', '', type=str).strip()
+        category = request.args.get('category', '', type=str).strip()
+        brand = request.args.get('brand', '', type=str).strip()
+        status = request.args.get('status', '', type=str).strip()
+        seller_name = request.args.get('seller_name', '', type=str).strip()
         
         # Validate pagination
         page = max(1, page)
-        limit = max(1, min(limit, 100))  # Cap at 100 per page to prevent abuse
+        limit = max(1, min(limit, 100))  # Cap at 100 per page
         
-        # Build query
+        # Build base query
         query = BlinkitProduct.query
         
-        # Apply filters
-        if search:
-            query = query.filter(BlinkitProduct.Product_name.ilike(f'%{search}%'))
+        # Apply filters safely using model column names
+        if search and hasattr(BlinkitProduct, 'Name'):
+            query = query.filter(BlinkitProduct.Name.ilike(f'%{search}%'))
         
-        if category:
-            query = query.filter(BlinkitProduct.category.ilike(f'%{category}%'))
+        if category and hasattr(BlinkitProduct, 'Product_Subcategory'):
+            query = query.filter(BlinkitProduct.Product_Subcategory.ilike(f'%{category}%'))
         
-        # Get total count before pagination
+        if brand and hasattr(BlinkitProduct, 'Brand'):
+            query = query.filter(BlinkitProduct.Brand.ilike(f'%{brand}%'))
+        
+        if status and hasattr(BlinkitProduct, 'Status'):
+            query = query.filter(BlinkitProduct.Status.ilike(f'%{status}%'))
+        
+        if seller_name and hasattr(BlinkitProduct, 'Seller_Name'):
+            query = query.filter(BlinkitProduct.Seller_Name.ilike(f'%{seller_name}%'))
+        
+        # Get total count
         total_count = query.count()
         
-        # Apply sorting and pagination
+        # Apply pagination
         products = query.order_by(BlinkitProduct.id.desc()).offset((page - 1) * limit).limit(limit).all()
         
-        # Serialize using to_dict() method from model
+        # Serialize using to_dict()
         results = [p.to_dict() for p in products]
         
-        # Calculate total pages
+        # Calculate pages
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
         
         return jsonify({
+            "message": "Blinkit products fetched successfully",
             "data": results,
             "total_count": total_count,
             "total_pages": total_pages,
@@ -74,4 +87,7 @@ def get_blinkit_data():
             "per_page": limit
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        print(f"Blinkit Error: {e}")
+        print(traceback.format_exc())
+        return jsonify({'error': str(e), 'message': 'Failed to fetch Blinkit products'}), 500

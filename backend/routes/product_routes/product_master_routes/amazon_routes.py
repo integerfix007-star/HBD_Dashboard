@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 import threading
 from extensions import db
-from model.product_model.amazon_product import AmazonProduct
+from model.product_model.product_amazon_model import AmazonProduct
 from services.scrapers.amazon_service import scrape_amazon_search
 
 amazon_api_bp = Blueprint('amazon_api_bp', __name__)
@@ -39,6 +39,8 @@ def get_amazon_data():
         limit = request.args.get('limit', 10, type=int)
         search = request.args.get('search', '', type=str)
         category = request.args.get('category', '', type=str)
+        subcategory = request.args.get('subcategory', '', type=str)
+        brand = request.args.get('brand', '', type=str)
         seller_id = request.args.get('seller_id', '', type=str)
         fba_status = request.args.get('fba_status', '', type=str)
         prime_eligible = request.args.get('prime_eligible', '', type=str)
@@ -54,14 +56,20 @@ def get_amazon_data():
         if search:
             query = query.filter(AmazonProduct.Product_name.ilike(f'%{search}%'))
         
-        if category:
+        if category and hasattr(AmazonProduct, 'category'):
             query = query.filter(AmazonProduct.category.ilike(f'%{category}%'))
         
-        if seller_id:
+        if subcategory and hasattr(AmazonProduct, 'subcategory'):
+            query = query.filter(AmazonProduct.subcategory.ilike(f'%{subcategory}%'))
+        
+        if brand and hasattr(AmazonProduct, 'Brand'):
+            query = query.filter(AmazonProduct.Brand.ilike(f'%{brand}%'))
+        
+        if seller_id and hasattr(AmazonProduct, 'Seller_ID'):
             query = query.filter(AmazonProduct.Seller_ID.ilike(f'%{seller_id}%'))
         
         # Apply status filters
-        if fba_status:
+        if fba_status and hasattr(AmazonProduct, 'FBA_Status'):
             query = query.filter(AmazonProduct.FBA_Status.ilike(f'%{fba_status}%'))
         
         if prime_eligible and prime_eligible.lower() in ['true', 'false']:
@@ -81,6 +89,7 @@ def get_amazon_data():
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
         
         return jsonify({
+            "message": "Amazon products fetched successfully",
             "data": results,
             "total_count": total_count,
             "total_pages": total_pages,
@@ -88,4 +97,7 @@ def get_amazon_data():
             "per_page": limit
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        print(f"Amazon Error: {e}")
+        print(traceback.format_exc())
+        return jsonify({'error': str(e), 'message': 'Failed to fetch Amazon products'}), 500

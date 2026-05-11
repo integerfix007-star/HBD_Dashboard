@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 import threading
 from extensions import db
-from model.product_model.bigbasket_product_model import BigBasketProduct
+from model.product_model.product_bigbasket_model import BigBasketProduct
 from services.scrapers.amazon_service import scrape_amazon_search
 
 bigbasket_api_bp = Blueprint('bigbasket_api_bp', __name__)
@@ -37,8 +37,11 @@ def get_bigbasket_data():
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
-        search = request.args.get('search', '', type=str)
-        category = request.args.get('category', '', type=str)
+        search = request.args.get('search', '', type=str).strip()
+        category = request.args.get('category', '', type=str).strip()
+        sub_category = request.args.get('sub_category', '', type=str).strip()
+        brand = request.args.get('brand', '', type=str).strip()
+        product_type = request.args.get('type', '', type=str).strip()
         
         # Validate pagination
         page = max(1, page)
@@ -49,10 +52,19 @@ def get_bigbasket_data():
         
         # Apply filters
         if search:
-            query = query.filter(BigBasketProduct.Product_name.ilike(f'%{search}%'))
+            query = query.filter(BigBasketProduct.product.ilike(f'%{search}%'))
         
-        if category:
+        if category and hasattr(BigBasketProduct, 'category'):
             query = query.filter(BigBasketProduct.category.ilike(f'%{category}%'))
+        
+        if sub_category and hasattr(BigBasketProduct, 'sub_category'):
+            query = query.filter(BigBasketProduct.sub_category.ilike(f'%{sub_category}%'))
+        
+        if brand and hasattr(BigBasketProduct, 'brand'):
+            query = query.filter(BigBasketProduct.brand.ilike(f'%{brand}%'))
+        
+        if product_type and hasattr(BigBasketProduct, 'type'):
+            query = query.filter(BigBasketProduct.type.ilike(f'%{product_type}%'))
         
         # Get total count before pagination
         total_count = query.count()
@@ -67,6 +79,7 @@ def get_bigbasket_data():
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
         
         return jsonify({
+            "message": "BigBasket products fetched successfully",
             "data": results,
             "total_count": total_count,
             "total_pages": total_pages,
@@ -74,4 +87,7 @@ def get_bigbasket_data():
             "per_page": limit
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        print(f"BigBasket Error: {e}")
+        print(traceback.format_exc())
+        return jsonify({'error': str(e), 'message': 'Failed to fetch BigBasket products'}), 500

@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 import threading
 from extensions import db
-from model.product_model.jio_mart_product_model import JioMartProduct
+from model.product_model.product_jiomart_model import JioMartProduct
 from services.scrapers.amazon_service import scrape_amazon_search
 
 jio_mart_api_bp = Blueprint('jio_mart_api_bp', __name__)
@@ -37,36 +37,57 @@ def get_jio_mart_data():
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
-        search = request.args.get('search', '', type=str)
-        category = request.args.get('category', '', type=str)
+        search = request.args.get('search', '', type=str).strip()
+        category = request.args.get('category', '', type=str).strip()
+        brand = request.args.get('brand', '', type=str).strip()
+        status = request.args.get('status', '', type=str).strip()
+        seller_name = request.args.get('seller_name', '', type=str).strip()
+        kirana_partner = request.args.get('kirana_partner', '', type=str).strip()
+        payment_gateway = request.args.get('payment_gateway', '', type=str).strip()
         
         # Validate pagination
         page = max(1, page)
-        limit = max(1, min(limit, 100))  # Cap at 100 per page to prevent abuse
+        limit = max(1, min(limit, 100))  # Cap at 100 per page
         
-        # Build query
+        # Build base query
         query = JioMartProduct.query
         
-        # Apply filters
-        if search:
-            query = query.filter(JioMartProduct.Product_name.ilike(f'%{search}%'))
+        # Apply filters safely using model column names
+        if search and hasattr(JioMartProduct, 'Name'):
+            query = query.filter(JioMartProduct.Name.ilike(f'%{search}%'))
         
-        if category:
-            query = query.filter(JioMartProduct.category.ilike(f'%{category}%'))
+        if category and hasattr(JioMartProduct, 'Product_Subcategory'):
+            query = query.filter(JioMartProduct.Product_Subcategory.ilike(f'%{category}%'))
         
-        # Get total count before pagination
+        if brand and hasattr(JioMartProduct, 'Brand'):
+            query = query.filter(JioMartProduct.Brand.ilike(f'%{brand}%'))
+        
+        if status and hasattr(JioMartProduct, 'Status'):
+            query = query.filter(JioMartProduct.Status.ilike(f'%{status}%'))
+        
+        if seller_name and hasattr(JioMartProduct, 'Seller_Name'):
+            query = query.filter(JioMartProduct.Seller_Name.ilike(f'%{seller_name}%'))
+        
+        if kirana_partner and hasattr(JioMartProduct, 'Kirana_Partner_ID'):
+            query = query.filter(JioMartProduct.Kirana_Partner_ID.ilike(f'%{kirana_partner}%'))
+        
+        if payment_gateway and hasattr(JioMartProduct, 'Payment_Gateway'):
+            query = query.filter(JioMartProduct.Payment_Gateway.ilike(f'%{payment_gateway}%'))
+        
+        # Get total count
         total_count = query.count()
         
-        # Apply sorting and pagination
+        # Apply pagination
         products = query.order_by(JioMartProduct.id.desc()).offset((page - 1) * limit).limit(limit).all()
         
-        # Serialize using to_dict() method from model
+        # Serialize using to_dict()
         results = [p.to_dict() for p in products]
         
-        # Calculate total pages
+        # Calculate pages
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
         
         return jsonify({
+            "message": "JioMart products fetched successfully",
             "data": results,
             "total_count": total_count,
             "total_pages": total_pages,
@@ -74,4 +95,7 @@ def get_jio_mart_data():
             "per_page": limit
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        print(f"JioMart Error: {e}")
+        print(traceback.format_exc())
+        return jsonify({'error': str(e), 'message': 'Failed to fetch JioMart products'}), 500

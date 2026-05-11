@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 import threading
 from extensions import db
-from model.product_model.india_mart_product_model import IndiaMartProduct
+from model.product_model.product_indiamart_model import IndiaMartProduct
 from services.scrapers.amazon_service import scrape_amazon_search
 
 india_mart_api_bp = Blueprint('india_mart_api_bp', __name__)
@@ -37,36 +37,57 @@ def get_india_mart_data():
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
-        search = request.args.get('search', '', type=str)
-        category = request.args.get('category', '', type=str)
+        search = request.args.get('search', '', type=str).strip()
+        category = request.args.get('category', '', type=str).strip()
+        brand = request.args.get('brand', '', type=str).strip()
+        status = request.args.get('status', '', type=str).strip()
+        seller_name = request.args.get('seller_name', '', type=str).strip()
+        supplier_level = request.args.get('supplier_level', '', type=str).strip()
+        min_order = request.args.get('min_order', '', type=str).strip()
         
         # Validate pagination
         page = max(1, page)
-        limit = max(1, min(limit, 100))  # Cap at 100 per page to prevent abuse
+        limit = max(1, min(limit, 100))  # Cap at 100 per page
         
-        # Build query
+        # Build base query
         query = IndiaMartProduct.query
         
-        # Apply filters
-        if search:
-            query = query.filter(IndiaMartProduct.Product_name.ilike(f'%{search}%'))
+        # Apply filters safely using model column names
+        if search and hasattr(IndiaMartProduct, 'Name'):
+            query = query.filter(IndiaMartProduct.Name.ilike(f'%{search}%'))
         
-        if category:
-            query = query.filter(IndiaMartProduct.category.ilike(f'%{category}%'))
+        if category and hasattr(IndiaMartProduct, 'Product_Subcategory'):
+            query = query.filter(IndiaMartProduct.Product_Subcategory.ilike(f'%{category}%'))
         
-        # Get total count before pagination
+        if brand and hasattr(IndiaMartProduct, 'Brand'):
+            query = query.filter(IndiaMartProduct.Brand.ilike(f'%{brand}%'))
+        
+        if status and hasattr(IndiaMartProduct, 'Status'):
+            query = query.filter(IndiaMartProduct.Status.ilike(f'%{status}%'))
+        
+        if seller_name and hasattr(IndiaMartProduct, 'Seller_Name'):
+            query = query.filter(IndiaMartProduct.Seller_Name.ilike(f'%{seller_name}%'))
+        
+        if supplier_level and hasattr(IndiaMartProduct, 'Supplier_Verif_Level'):
+            query = query.filter(IndiaMartProduct.Supplier_Verif_Level.ilike(f'%{supplier_level}%'))
+        
+        if min_order and hasattr(IndiaMartProduct, 'Min_Order_Value'):
+            query = query.filter(IndiaMartProduct.Min_Order_Value.ilike(f'%{min_order}%'))
+        
+        # Get total count
         total_count = query.count()
         
-        # Apply sorting and pagination
+        # Apply pagination
         products = query.order_by(IndiaMartProduct.id.desc()).offset((page - 1) * limit).limit(limit).all()
         
-        # Serialize using to_dict() method from model
+        # Serialize using to_dict()
         results = [p.to_dict() for p in products]
         
-        # Calculate total pages
+        # Calculate pages
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
         
         return jsonify({
+            "message": "IndiaMART products fetched successfully",
             "data": results,
             "total_count": total_count,
             "total_pages": total_pages,
@@ -74,4 +95,7 @@ def get_india_mart_data():
             "per_page": limit
         }), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        print(f"IndiaMART Error: {e}")
+        print(traceback.format_exc())
+        return jsonify({'error': str(e), 'message': 'Failed to fetch IndiaMART products'}), 500

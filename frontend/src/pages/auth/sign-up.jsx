@@ -76,7 +76,7 @@ export function SignUp() {
 
   const handleGoogleLogin = async (credentialResponse) => {
     try {
-      const res = await api.post("/google-login", {
+      const res = await api.post("/auth/google-login", {
         token: credentialResponse.credential,
       });
 
